@@ -8,7 +8,7 @@
 **Instructor / Sponsor:** Lucas Cordova (`LucasCordova` on GitHub)
 **GitHub repo:** [https://github.com/users/perezamp15-hue/projects/1/views/1](https://github.com/perezamp15-hue/data510-FitnessPal
 **GitHub Projects board:** (https://github.com/perezamp15-hue/data510-FitnessPal)
-**Discord category:** `#<project>-*`
+**Discord category:** `#<project>-1`
 **Studio Session:** 1
 **Studio formed:** 5/25/2026
 
@@ -37,9 +37,9 @@ One or two sentences. What the owner team will actually do this semester.
 
 ## Working agreements (internal to owner team)
 
-- **Sync rhythm:** <e.g., one async standup per weekday in `#<project>-standup`>
-- **Code review:** <who reviews what, by when>
-- **Decision rule:** <how the team decides when it disagrees>
+- **Sync rhythm:** <Solo Project`#<project>-standup`>
+- **Code review:** <Solo Project>
+- **Decision rule:** <Solo Project>
 
 ## Working agreements (triad with peer POs)
 
