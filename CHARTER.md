@@ -14,25 +14,25 @@
 
 ## Vision
 
-This is for the fitness industry and trying to find your best self in your fitness journey
+This is for the fitness industry and trying to find your best self in your fitness journey.
 
 ## Mission
-Building a plantform that will help people with their fitness and workout goals in containing plantform.
+Building a plantform that will help people with their fitness and workout goals in containing plantform. To make it more efficient and more accessible to all people that willing to commit to change
 
 ## Context
 
 - **Users / affected parties:** People wanting to help in fitness goals, gym goers, 
 - **Data sources (proposed):** USDA, fitnee network, ethical people health information
-- **Constraints:** One of the main contraints of the project is 
+- **Constraints:** One of the main contraints of the project is that trying find reputable sources for the fitness
 - **Ethics risks:** Major due to personal health issues and related health problems
 
 ## Success criteria by milestone
 
-- **M1, proposal (W4):** <measurable criterion>
-- **M2, data summary (W7):** <measurable criterion>
-- **M3, poster rough draft (W10):** <measurable criterion>
-- **M4, write-up rough draft (W12):** <measurable criterion>
-- **M5, final write-up and poster (W14):** <measurable criterion>
+- **M1, proposal (W4):** Finished hypothesis and goal
+- **M2, data summary (W7):** data sources are collected and organize
+- **M3, poster rough draft (W10):** Finished mocked up of the poster and organzation
+- **M4, write-up rough draft (W12):** At least 70% of the paper done
+- **M5, final write-up and poster (W14):** Everything is finished
 
 ## Working agreements (internal to owner team)
 
@@ -42,7 +42,7 @@ Building a plantform that will help people with their fitness and workout goals 
 
 ## Working agreements (triad with peer POs)
 
-- **Studio Brief due:** Should the Brief be needed will need to be done on major milestone requested should be sumbited to`studio/briefs/W<NN>-<peer>.md` and linked in `#<project>-studio` on Discord. If the owner team needs the peer POs to read or review something specific *before* the Studio Session (a data preview, model results, a draft figure), 
+- **Studio Brief due:** Should the Brief be needed will need to be done on major milestone or requested should be sumbited to`studio/briefs/W<NN>-<peer>.md` and linked in `#<project>-studio` on Discord. If the owner team needs the peer POs to read or review something specific *before* the Studio Session (a data preview, model results, a draft figure), 
 - **Studio Critique due:** The Studio Criquite will be due in studio/criqute/ when major milestones are due and as needed by the owner.
 - **Priority conflict resolution:** owner team integrates briefs in good faith; the instructor arbitrates (as Process Expert) if peer POs and owner team disagree.
 
@@ -78,22 +78,18 @@ A PBI is done, and may be moved from `Analyze` into `Done`, when:
 - A peer PO has either signed off in `#<project>-studio` or filed a Studio Critique covering it.
 - The card is linked under *Completed PBIs* in the next Iteration Review in `README.md`.
 
-## Context map
-
-> Optional. Replace this block with a Mermaid `flowchart LR` showing how users, data, constraints, and ethics risks flow into the owner team and out to the capstone outcome. See the [`charter-inception.qmd` template](https://courses.lpcordova.phd/data510/project-framework/charter-inception.html) for a starting Mermaid diagram.
-
 ## Stakeholder alignment memo (one-page summary)
 
 ### Why we exist
-<two sentences from Vision and Mission>
+We exist to help people contiune on their fitness goal and to better healthy lifestlye. It is transitoning to more of a healthier for people to move forward.
 
 ### What we will deliver to peer POs every week
-- An Iteration Review in this `README.md` by <Sunday/ by 11:59pm>
+- An Iteration Review in this `README.md` by Sunday/ by 11:59pm
 - A summary of which Studio Brief items we adopted, deferred, or declined and why
 
 ### What we need from peer POs every week
-- A Studio Brief by <day / time> next class (next iteration's requirements, questions, risks)
-- A Studio Critique by <day / time> next class (assessment of last week's delivery)
+- A Studio Brief by if there is a studion Brief is needed for the week than it is due before class
+- A Studio Critique by if they 
 
 ### How to reach us
 - Discord category: `#<project>-general` (day-to-day), `#<project>-studio` (Briefs and Critiques), `#<project>-blockers` (impediments)
