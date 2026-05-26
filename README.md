@@ -8,7 +8,7 @@
 |-------|-------|
 | Owner team | Aaron Perez |
 | Owner Product Lead | Aaron Perez |
-| Peer Stakeholder POs | Bradley Allen	Addison Gage	Sarah Alhusaynat |
+| Peer Stakeholder POs | Bradley Allen,	Addison Gage,	Sarah Alhusaynat |
 | Studio Session | 1 |
 | GitHub repo | <link to this repo> |
 | GitHub Projects board | <link> |
