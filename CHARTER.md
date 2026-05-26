@@ -22,8 +22,8 @@ Building a plantform that will help people with their fitness and workout goals 
 ## Context
 
 - **Users / affected parties:** People wanting to help in fitness goals, gym goers, 
-- **Data sources (proposed):** named sources, access status, license / ethics notes.
-- **Constraints:** time, compute, access, skills, scope.
+- **Data sources (proposed):** USDA, fitnee network, ethical people health information
+- **Constraints:** One of the main contraints of the project is 
 - **Ethics risks:** consent, retention, PII, fairness, deployment risk.
 
 ## Success criteria by milestone
@@ -42,8 +42,8 @@ Building a plantform that will help people with their fitness and workout goals 
 
 ## Working agreements (triad with peer POs)
 
-- **Studio Brief due:** <example: by 5 pm the day before class, committed to `studio/briefs/W<NN>-<peer>.md` and linked in `#<project>-studio` on Discord>. If the owner team needs the peer POs to read or review something specific *before* the Studio Session (a data preview, model results, a draft figure), file the Brief earlier so the peer POs actually have time to do that homework. Otherwise the default is "before the Studio Session starts."
-- **Studio Critique due:** <example: by the end of class for the in-person discussion, or at an agreed-upon time within one day after class (e.g., 5 pm the next day) if the peer PO needs extra time to draft a thoughtful write-up>.
+- **Studio Brief due:** I am going to submit by before class, committed to `studio/briefs/W<NN>-<peer>.md` and linked in `#<project>-studio` on Discord. If the owner team needs the peer POs to read or review something specific *before* the Studio Session (a data preview, model results, a draft figure), file the Brief earlier so the peer POs actually have time to do that homework. Otherwise the default is "before the Studio Session starts."
+- **Studio Critique due:** The Studio Criquite will be due in studio/criqute/ before class.
 - **Priority conflict resolution:** owner team integrates briefs in good faith; the instructor arbitrates (as Process Expert) if peer POs and owner team disagree.
 
 ## Response SLAs (Service Level Agreements)
@@ -88,7 +88,7 @@ A PBI is done, and may be moved from `Analyze` into `Done`, when:
 <two sentences from Vision and Mission>
 
 ### What we will deliver to peer POs every week
-- An Iteration Review in this `README.md` by <day / time>
+- An Iteration Review in this `README.md` by <Sunday/ by 11:59pm>
 - A summary of which Studio Brief items we adopted, deferred, or declined and why
 
 ### What we need from peer POs every week
