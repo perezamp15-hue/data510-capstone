@@ -11,7 +11,7 @@
 | Peer Stakeholder POs | Bradley Allen,	Addison Gage,	Sarah Alhusaynat |
 | Studio Session | 1 |
 | GitHub repo | <link to this repo> |
-| GitHub Projects board | <link> |
+| GitHub Projects board | [<link>](https://github.com/users/perezamp15-hue/projects/1) |
 | Discord category | `#<project>-*` |
 | Instructor / Sponsor | Lucas Cordova (`LucasCordova` on GitHub) |
 
