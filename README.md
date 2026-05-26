@@ -1,4 +1,4 @@
-# <Project Name>
+# Fitness Pal
 
 > One-sentence description of what this project is about. Replace this entire block before week 3.
 
@@ -6,10 +6,10 @@
 
 | Field | Value |
 |-------|-------|
-| Owner team | <names> |
-| Owner Product Lead | <name> |
-| Peer Stakeholder POs | <names of your 2 or 3 peer PO individuals> |
-| Studio Session | <1, 2, or 3> |
+| Owner team | Aaron Perez |
+| Owner Product Lead | Aaron Perez |
+| Peer Stakeholder POs | Bradley Allen	Addison Gage	Sarah Alhusaynat |
+| Studio Session | 1 |
 | GitHub repo | <link to this repo> |
 | GitHub Projects board | <link> |
 | Discord category | `#<project>-*` |
