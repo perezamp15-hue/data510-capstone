@@ -14,11 +14,11 @@
 
 ## Vision
 
-One or two sentences. The world (or organization, or domain) if this project succeeds.
+# This is for the fitness industry and trying to find your best self in your fitness journey
 
 ## Mission
 
-One or two sentences. What the owner team will actually do this semester.
+FOr the One or two sentences. What the owner team will actually do this semester.
 
 ## Context
 
@@ -37,9 +37,9 @@ One or two sentences. What the owner team will actually do this semester.
 
 ## Working agreements (internal to owner team)
 
-- **Sync rhythm:** <Solo Project`#<project>-standup`>
-- **Code review:** <Solo Project>
-- **Decision rule:** <Solo Project>
+- **Sync rhythm:** Solo Project`#<project>-standup`
+- **Code review:** Solo Project
+- **Decision rule:** Solo Project
 
 ## Working agreements (triad with peer POs)
 
@@ -98,5 +98,5 @@ A PBI is done, and may be moved from `Analyze` into `Done`, when:
 
 ### How to reach us
 - Discord category: `#<project>-general` (day-to-day), `#<project>-studio` (Briefs and Critiques), `#<project>-blockers` (impediments)
-- GitHub repo: <link>
-- GitHub Projects board: <link>
+- GitHub repo: https://github.com/perezamp15-hue/data510-FitnessPal
+- GitHub Projects board: https://github.com/users/perezamp15-hue/projects/1/views/1
