@@ -14,15 +14,14 @@
 
 ## Vision
 
-# This is for the fitness industry and trying to find your best self in your fitness journey
+This is for the fitness industry and trying to find your best self in your fitness journey
 
 ## Mission
-
-FOr the One or two sentences. What the owner team will actually do this semester.
+Building a plantform that will help people with their fitness and workout goals in containing plantform.
 
 ## Context
 
-- **Users / affected parties:** who benefits, who is at risk, who might use the result.
+- **Users / affected parties:** People wanting to help in fitness goals, gym goers, 
 - **Data sources (proposed):** named sources, access status, license / ethics notes.
 - **Constraints:** time, compute, access, skills, scope.
 - **Ethics risks:** consent, retention, PII, fairness, deployment risk.
