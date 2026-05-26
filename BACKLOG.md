@@ -16,11 +16,9 @@ This file is the **human-readable mirror** of the [GitHub Projects (v2) Iterativ
 
 ### PBI-001
 
-- **Title:** Acquire and document <dataset>
-- **Hypothesis:** <dataset> is accessible, license-compatible, and large enough to answer <RQ>.
-- **Create:** ingestion script and `data/README.md` section describing schema.
-- **Observe:** row counts, missingness, key uniqueness, distribution sanity checks.
-- **Analyze:** decide whether the dataset survives feasibility; document in the next Iteration Review.
+- **Title:** Acquire and document 
+- **Hypothesis:** 
+- **Create:** 
 - **Tag:** `M1-proposal`
 - **Size:** M
 - **GitHub issue:** <link once filed>
