@@ -1,16 +1,16 @@
-# Studio Charter: <project name>
+# Studio Charter: Fitness Pal
 
 > Filled in live during the **Studio Charter** session in week 3. Every section below is committed in the same commit at the end of that class block. See [Studio Charter (single-session inception)](https://courses.lpcordova.phd/data510/project-framework/charter-inception.html) for the script and time-boxes.
 
-**Owner team:** <names>
-**Owner Product Lead:** <name>
-**Peer Stakeholder POs:** <names of your 2 or 3 peer PO individuals>
+**Owner team:** Aaron Perez
+**Owner Product Lead:** Aaron Perez
+**Peer Stakeholder POs:** Bradley Allen,	Addison Gage,	Sarah Alhusaynat
 **Instructor / Sponsor:** Lucas Cordova (`LucasCordova` on GitHub)
-**GitHub repo:** <link to this repo>
-**GitHub Projects board:** <link>
+**GitHub repo:** [https://github.com/users/perezamp15-hue/projects/1/views/1](https://github.com/perezamp15-hue/data510-FitnessPal
+**GitHub Projects board:** (https://github.com/perezamp15-hue/data510-FitnessPal)
 **Discord category:** `#<project>-*`
-**Studio Session:** <1, 2, or 3>
-**Studio formed:** <date>
+**Studio Session:** 1
+**Studio formed:** 5/25/2026
 
 ## Vision
 
