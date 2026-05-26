@@ -24,7 +24,7 @@ Building a plantform that will help people with their fitness and workout goals 
 - **Users / affected parties:** People wanting to help in fitness goals, gym goers, 
 - **Data sources (proposed):** USDA, fitnee network, ethical people health information
 - **Constraints:** One of the main contraints of the project is 
-- **Ethics risks:** consent, retention, PII, fairness, deployment risk.
+- **Ethics risks:** Major due to personal health issues and related health problems
 
 ## Success criteria by milestone
 
@@ -42,8 +42,8 @@ Building a plantform that will help people with their fitness and workout goals 
 
 ## Working agreements (triad with peer POs)
 
-- **Studio Brief due:** I am going to submit by before class, committed to `studio/briefs/W<NN>-<peer>.md` and linked in `#<project>-studio` on Discord. If the owner team needs the peer POs to read or review something specific *before* the Studio Session (a data preview, model results, a draft figure), file the Brief earlier so the peer POs actually have time to do that homework. Otherwise the default is "before the Studio Session starts."
-- **Studio Critique due:** The Studio Criquite will be due in studio/criqute/ before class.
+- **Studio Brief due:** Should the Brief be needed will need to be done on major milestone requested should be sumbited to`studio/briefs/W<NN>-<peer>.md` and linked in `#<project>-studio` on Discord. If the owner team needs the peer POs to read or review something specific *before* the Studio Session (a data preview, model results, a draft figure), 
+- **Studio Critique due:** The Studio Criquite will be due in studio/criqute/ when major milestones are due and as needed by the owner.
 - **Priority conflict resolution:** owner team integrates briefs in good faith; the instructor arbitrates (as Process Expert) if peer POs and owner team disagree.
 
 ## Response SLAs (Service Level Agreements)
