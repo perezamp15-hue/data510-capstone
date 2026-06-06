@@ -1,4 +1,4 @@
-# Fitness Pal
+# GM Simulator 
 
 > This project is going to find the right fitness goal for everyone that is willing to and want to make a change in their fitness journey. Trying to have a better healthly lifestlye think about change. 
 
