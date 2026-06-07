@@ -1,6 +1,6 @@
 # GM Simulator 
 
-> This project is going to find the right fitness goal for everyone that is willing to and want to make a change in their fitness journey. Trying to have a better healthly lifestlye think about change. 
+> The overarching vision of this initiative is to equip baseball organizations with a sophisticated predictive analytical environment, effectively translating raw environmental variables and individual player metrics into actionable intelligence to optimize strategic roster management and field positioning. <
 
 ## Quick reference
 
