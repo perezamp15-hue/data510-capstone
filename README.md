@@ -40,11 +40,11 @@ One subsection per class week. The owner team commits the new section **before e
 
 ## Week 4 -- Proposal milestone (M1)
 
-**Iteration ending:** <date>
+**Iteration ending:** <06/07/2026>
 **Milestone tag in focus:** `M1-proposal`
 
 **Completed PBIs**
-- ...
+- Proposal Done
 
 **In-flight (carrying across the boundary)**
 - ...
