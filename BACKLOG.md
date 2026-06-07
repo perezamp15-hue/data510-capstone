@@ -103,8 +103,7 @@ This file is the **human-readable mirror** of the [GitHub Projects (v2) Iterativ
 ### PBI-007: XGBoost Classification
 - **Title:** Train and Optimize Multi-Class XGBoost At-Bat Classifier
 - **Hypothesis:** A gradient-boosted decision tree can successfully predict discrete plate-appearance probability distributions when fed short-term form and environmental features.
-- **Create:** XGBoost Multi-Class Classifier mapping features to categorical outcomes:
-$$\text{Output} = [P(\text{Single}), P(\text{Double}), P(\text{Triple}), P(\text{HR}), P(\text{Walk}), P(\text{Out})]$$
+- **Create:** XGBoost Multi-Class Classifier mapping features to categorical 
 - **Observe:** Multi-class Log Loss metrics, Macro-F1 scores against the testing split, and feature importance ranking charts.
 - **Analyze:** Assess whether adding wind and air density columns statistically reduced model log loss compared to models built on player data alone.
 - **Tag:** `M3-poster-draft`
@@ -119,8 +118,8 @@ $$\text{Output} = [P(\text{Single}), P(\text{Double}), P(\text{Triple}), P(\text
 - **Title:** Program the Monte Carlo Simulation Engine State Machine
 - **Hypothesis:** Simulating a game plate-appearance by plate-appearance 10,000 times creates a realistic distribution of score outcomes that outperforms flat game-level guesses.
 - **Create:** Full baseball game state machine loop inside `src/simulator.py` to track innings, outs, base runners, and batting order rotations.
-- **Observe:** 10,000 batch simulation loops for validation games, recording the resulting run distributions, projected final scores, and win percentages.
-- **Analyze:** Compare the simulator's score prediction Mean Absolute Error (MAE) against baseline models to determine if our contextual simulator beats traditional methods ($\Delta \text{MAE} \ge 5\%$).
+- **Observe:** batch simulation loops for validation games, recording the resulting run distributions, projected final scores, and win percentages.
+- **Analyze:** Compare the simulator's score prediction Mean Absolute Error (MAE) against baseline models to determine if our contextual simulator beats traditional methods 
 - **Tag:** `M3-poster-draft`
 - **Size:** XL
 - **GitHub issue:** *Leave blank for GitHub integration*
