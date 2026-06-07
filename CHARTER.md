@@ -1,4 +1,4 @@
-# Studio Charter: Fitness Pal
+# Studio Charter: GM Simulator 
 
 > Filled in live during the **Studio Charter** session in week 3. Every section below is committed in the same commit at the end of that class block. See [Studio Charter (single-session inception)](https://courses.lpcordova.phd/data510/project-framework/charter-inception.html) for the script and time-boxes.
 
@@ -14,17 +14,19 @@
 
 ## Vision
 
-This is for the fitness industry and trying to find your best self in your fitness journey.
+The overarching vision of this initiative is to equip baseball organizations with a sophisticated predictive analytical environment, effectively translating raw environmental variables and individual player metrics into actionable intelligence to optimize strategic roster management and field positioning. 
 
 ## Mission
-Building a plantform that will help people with their fitness and workout goals in containing plantform. To make it more efficient and more accessible to all people that willing to commit to change
+The primary mission of this project is to build a comprehensive data pipeline and data storage infrastructure, to create a simulation engine. By synthesizing official MLB statistical datasets with climate forecasts and unique stadium spatial parameters, the initiative aims to provide probabilistic game outcome distributions. Through a dynamic web based dashboard designed for general managers, offering comparative simulation capabilities between opposing teams.
 
 ## Context
 
-- **Users / affected parties:** People wanting to help in fitness goals, gym goers, 
-- **Data sources (proposed):** USDA, fitnee network, ethical people health information
-- **Constraints:** One of the main contraints of the project is that trying find reputable sources for the fitness
-- **Ethics risks:** Major due to personal health issues and related health problems
+- **Users / affected parties:** GM, and Front Office of baseball teams 
+- **Data sources (proposed):** 
+- **Constraints:** One of the main contraints is the ability to understand the player outcome on player psycological state
+- **Ethics risks:** Predictive tools used by front offices directly impact player compensation, arbitration values, and field time. If a prediction model operates as an opaque "black box," it can create unfair biases against certain player profiles. To ensure transparency, the dashboard surfaces global feature importance metrics and local decision paths. This allows users to see exactly how much an environmental adjustment (e.g., wind speed) influenced a player's projected performance. 
+Furthermore, the model limits inputs to on-field metrics, remaining blind to player age, contract size, or demographic backgrounds to maintain objective, performance-based predictions.
+
 
 ## Success criteria by milestone
 
@@ -81,7 +83,7 @@ A PBI is done, and may be moved from `Analyze` into `Done`, when:
 ## Stakeholder alignment memo (one-page summary)
 
 ### Why we exist
-We exist to help people contiune on their fitness goal and to better healthy lifestlye. It is transitoning to more of a healthier for people to move forward.
+If successful, this project demonstrates a reproducible blueprint for contextual sports analytics. Organizations benefit from a sports-analytics framework capable of running "what-if" environmental simulations allowing front offices to optimize starting lineups, pitching rotations, and in-game strategic shifts based on real-time weather changes and park dimensions. 
 
 ### What we will deliver to peer POs every week
 - An Iteration Review in this `README.md` by Sunday/ by 11:59pm
