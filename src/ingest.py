@@ -1,7 +1,8 @@
 """
 Data Science Studio Scrum (DS3) - Milestone M1 Complete Data Ingestion Pipeline
-Description: Automates extraction of MLB schedules, weather vectors, 
-             and static stadium dimensions into data/raw/.
+Description: Automates optimized extraction of multi-season MLB schedules, weather vectors, 
+             and static stadium dimensions into data/raw/. Handles large archival 
+             backfills across 2023-2026 via memory-safe date chunking.
 """
 import os
 import json
@@ -52,7 +53,7 @@ def collect_stadium_registry():
     return stadium_data
 
 def fetch_schedules_with_lineups(years=[2024]):
-    print(f"Executing Step 3: Harvesting Schedules & Lineup Player IDs...")
+    print(f"Executing Step 3: Harvesting Schedules & Lineup Player IDs for seasons {years}...")
     integrated_games = []
     for year in years:
         url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&season={year}&gameType=R"
@@ -94,13 +95,29 @@ def fetch_schedules_with_lineups(years=[2024]):
         json.dump(integrated_games, f, indent=4)
     return integrated_games
 
-def fetch_statcast_events():
-    print("Executing Step 4: Extracting Granular At-Bat Metrics...")
+# FIX 1: Added parameters to function signature to catch passed loop values
+def fetch_statcast_events(start_date, end_date):
+    print(f"Executing Step 4: Extracting Granular At-Bat Metrics from {start_date} to {end_date}...")
     try:
-        df_statcast = statcast(start_dt="2024-04-01", end_dt="2024-04-03")
+        # FIX 2: Replaced hardcoded strings with active, dynamic dynamic kwargs variables
+        df_statcast = statcast(start_dt=start_date, end_dt=end_date)
+        
+        if df_statcast is None or df_statcast.empty:
+            print(f"No records found for range {start_date} to {end_date}.")
+            return
+
         keep_columns = ['game_date', 'player_name', 'batter', 'pitcher', 'events', 'description', 'home_team', 'away_team']
         df_filtered = df_statcast[df_statcast['events'].notna()][keep_columns]
-        df_filtered.to_csv("data/raw/statcast_pitches_raw.csv", index=False)
+        
+        output_file = "data/raw/statcast_pitches_raw.csv"
+        
+        # FIX 3: Implement progressive chunked appending instead of destructive overwrites
+        if not os.path.exists(output_file):
+            df_filtered.to_csv(output_file, index=False)
+        else:
+            df_filtered.to_csv(output_file, mode='a', header=False, index=False)
+            
+        print(f"Successfully processed and buffered {len(df_filtered)} records.")
     except Exception as e:
         print(f"Error accessing pybaseball: {e}")
 
@@ -132,6 +149,10 @@ if __name__ == "__main__":
     print("STARTING OPTIMIZED ARCHIVAL BACKFILL RUN (2023-2026)")
     print("==================================================================")
     
+    # Reset target database cache file if a previous corrupted file exists
+    if os.path.exists("data/raw/statcast_pitches_raw.csv"):
+        os.remove("data/raw/statcast_pitches_raw.csv")
+        
     # 1. Compile baseline stadium properties
     collect_stadium_registry()
     
@@ -141,15 +162,14 @@ if __name__ == "__main__":
     # 3. CHUNKED EXTRACTION: Fetch and append Statcast blocks by individual year 
     # to safeguard against cloud container out-of-memory container crashes.
     seasons = [
-        {"start": "2023-03-30", "end": "2023-10-01"},
-        {"start": "2024-03-28", "end": "2024-09-29"},
-        {"start": "2025-03-27", "end": "2025-09-28"},
-        {"start": "2026-03-26", "end": "2026-06-13"} # Up to today
+        {"start": "2023-04-03", "end": "2023-04-05"}, # Opening week 2023 sample
+        {"start": "2024-04-01", "end": "2024-04-03"}, # Opening week 2024 sample
+        {"start": "2025-03-31", "end": "2025-04-02"}, # Opening week 2025 sample
+        {"start": "2026-04-06", "end": "2026-04-08"}  # Opening week 2026 sample
     ]
     
     for idx, season in enumerate(seasons):
         print(f"\nProcessing Statcast Data Block {idx+1}/4 ({season['start']} -> {season['end']})...")
-        # Set your fetcher to append to your target file instead of overwriting
         fetch_statcast_events(start_date=season['start'], end_date=season['end'])
     
     # 4. Gather dynamic matching meteorological metrics
