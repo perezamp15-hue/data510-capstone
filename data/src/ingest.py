@@ -19,7 +19,6 @@ os.makedirs("data/raw", exist_ok=True)
 
 def collect_stadium_registry():
     """Step 2: Compiles the baseline static structural matrix for all 30 Major League parks."""
-    print("Executing Step 2: Compiling Production 30-Ballpark Registry...")
     
     stadium_data = [
         {"stadium_id": "yankees", "name": "Yankee Stadium", "team": "New York Yankees", "latitude": 40.8296, "longitude": -73.9262, "altitude_ft": 54},
@@ -57,13 +56,11 @@ def collect_stadium_registry():
     df = pd.DataFrame(stadium_data)
     output_path = "data/raw/stadium_registry.csv"
     df.to_csv(output_path, index=False)
-    print(f"-> Success: All 30 active teams written to {output_path}.\n")
     return stadium_data
 
 
 def fetch_schedules_with_lineups(years=[2024]):
     """Step 3: Queries the MLB StatsAPI for game schedules and active lineup player IDs."""
-    print(f"Executing Step 3: Harvesting Schedules & Lineup Player IDs for {years}...")
     integrated_games = []
     
     for year in years:
