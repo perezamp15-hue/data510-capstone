@@ -9,7 +9,6 @@ import json
 import requests
 
 def extract_detailed_game_logs(game_pk_list=[747031]):
-    print("\nSTARTING DETAILED ROLE-SEPARATED GAME LOG ENGINE...")
     all_game_logs = {}
 
     for game_pk in game_pk_list:
