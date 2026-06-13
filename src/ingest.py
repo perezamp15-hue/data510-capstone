@@ -128,8 +128,20 @@ def fetch_hourly_weather(games_list):
         json.dump(weather_records, f, indent=4)
 
 if __name__ == "__main__":
+    print("STARTING ARCHIVAL MULTI-SEASON BACKFILL PRODUCTION RUN...\n")
+    
+    # 1. Compile static baseline stadium tracking map
     collect_stadium_registry()
-    sched = fetch_schedules_with_lineups()
-    fetch_statcast_events()
-    if sched:
-        fetch_hourly_weather(sched)
+    
+    # 2. Extract full regular-season calendars and starting lineup IDs (2023 - 2026)
+    schedule_data = fetch_schedules_with_lineups(years=[2023, 2024, 2025, 2026])
+    
+    # 3. Pull pitch telemetry from the start of 2023 season through June 2026
+    # NOTE: Pybaseball pulls can take several minutes on remote runners for massive ranges.
+    fetch_statcast_events(start_date="2023-03-30", end_date="2026-06-13")
+    
+    # 4. Pull dynamic matching weather archives for the games collected
+    if schedule_data:
+        fetch_hourly_weather(schedule_data)
+        
+    print("BACKFILL TASK COMPLETED SUCCESSFULLY.")
