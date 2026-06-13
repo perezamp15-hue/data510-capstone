@@ -129,18 +129,31 @@ def fetch_hourly_weather(games_list):
 
 if __name__ == "__main__":
     print("==================================================================")
-    print("STARTING ARCHIVAL MULTI-SEASON BACKFILL PRODUCTION RUN (2023-2026)")
+    print("STARTING OPTIMIZED ARCHIVAL BACKFILL RUN (2023-2026)")
     print("==================================================================")
     
+    # 1. Compile baseline stadium properties
     collect_stadium_registry()
     
-    # Extracts calendars/lineups from 2023 through 2026
+    # 2. Extract regular-season match metadata frameworks
     schedule_data = fetch_schedules_with_lineups(years=[2023, 2024, 2025, 2026])
     
-    # Pulls pitch telemetry from opening day 2023 up to today (June 13, 2026)
-    fetch_statcast_events(start_date="2023-03-30", end_date="2026-06-13")
+    # 3. CHUNKED EXTRACTION: Fetch and append Statcast blocks by individual year 
+    # to safeguard against cloud container out-of-memory container crashes.
+    seasons = [
+        {"start": "2023-03-30", "end": "2023-10-01"},
+        {"start": "2024-03-28", "end": "2024-09-29"},
+        {"start": "2025-03-27", "end": "2025-09-28"},
+        {"start": "2026-03-26", "end": "2026-06-13"} # Up to today
+    ]
     
+    for idx, season in enumerate(seasons):
+        print(f"\nProcessing Statcast Data Block {idx+1}/4 ({season['start']} -> {season['end']})...")
+        # Set your fetcher to append to your target file instead of overwriting
+        fetch_statcast_events(start_date=season['start'], end_date=season['end'])
+    
+    # 4. Gather dynamic matching meteorological metrics
     if schedule_data:
         fetch_hourly_weather(schedule_data)
         
-    print("==================================================================")
+    print("\n==================================================================")
