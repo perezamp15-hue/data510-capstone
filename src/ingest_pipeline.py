@@ -1,6 +1,6 @@
 """
-Data Science Studio Scrum (DS3) - Normalization Engine (Syntax Patch)
-Description: Converts raw staging layers into production 3NF structured data warehouses.
+Data Science Studio Scrum (DS3) - Master Ingestion Engine
+Description: Seeds complete 30-stadium telemetry and harvests multi-season raw data.
 """
 import os
 import sys
@@ -8,168 +8,132 @@ import json
 import time
 import requests
 import pandas as pd
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
+from pybaseball import statcast
 
-def run_normalization_pipeline():
-    
+def get_database_engine():
     db_url = os.getenv("DATABASE_URL")
     if not db_url:
+        print("CRITICAL ERROR: DATABASE_URL environment variable is blank.")
         sys.exit(1)
     if db_url.startswith("postgres://"):
         db_url = db_url.replace("postgres://", "postgresql://", 1)
+    return create_engine(db_url)
+
+def seed_stadium_registry(engine):
+    print("\n[STEP 1] Seeding Complete 30-Ballpark Reference Registry...")
+    stadium_data = [
+        {"stadium_id": "angels", "name": "Angel Stadium", "team": "Los Angeles Angels", "latitude": 33.8003, "longitude": -117.8827, "altitude_ft": 160},
+        {"stadium_id": "astros", "name": "Minute Maid Park", "team": "Houston Astros", "latitude": 29.7573, "longitude": -95.3555, "altitude_ft": 23},
+        {"stadium_id": "athletics", "name": "Sutter Health Park", "team": "Athletics", "latitude": 38.5802, "longitude": -121.5074, "altitude_ft": 45},
+        {"stadium_id": "blue_jays", "name": "Rogers Centre", "team": "Toronto Blue Jays", "latitude": 43.6414, "longitude": -79.3894, "altitude_ft": 247},
+        {"stadium_id": "braves", "name": "Truist Park", "team": "Atlanta Braves", "latitude": 33.8907, "longitude": -84.4678, "altitude_ft": 980},
+        {"stadium_id": "brewers", "name": "American Family Field", "team": "Milwaukee Brewers", "latitude": 43.0284, "longitude": -87.9712, "altitude_ft": 600},
+        {"stadium_id": "cardinals", "name": "Busch Stadium", "team": "St. Louis Cardinals", "latitude": 38.6226, "longitude": -90.1928, "altitude_ft": 455},
+        {"stadium_id": "cubs", "name": "Wrigley Field", "team": "Chicago Cubs", "latitude": 41.9484, "longitude": -87.6553, "altitude_ft": 600},
+        {"stadium_id": "diamondbacks", "name": "Chase Field", "team": "Arizona Diamondbacks", "latitude": 33.4453, "longitude": -112.0667, "altitude_ft": 1082},
+        {"stadium_id": "dodgers", "name": "Dodger Stadium", "team": "Los Angeles Dodgers", "latitude": 34.0739, "longitude": -118.2400, "altitude_ft": 502},
+        {"stadium_id": "giants", "name": "Oracle Park", "team": "San Francisco Giants", "latitude": 37.7786, "longitude": -122.3893, "altitude_ft": 8},
+        {"stadium_id": "guardians", "name": "Progressive Field", "team": "Cleveland Guardians", "latitude": 41.4958, "longitude": -81.6853, "altitude_ft": 655},
+        {"stadium_id": "mariners", "name": "T-Mobile Park", "team": "Seattle Mariners", "latitude": 47.5914, "longitude": -122.3325, "altitude_ft": 10},
+        {"stadium_id": "marlins", "name": "loanDepot park", "team": "Miami Marlins", "latitude": 25.7781, "longitude": -80.2197, "altitude_ft": 15},
+        {"stadium_id": "mets", "name": "Citi Field", "team": "New York Mets", "latitude": 40.7571, "longitude": -73.8458, "altitude_ft": 15},
+        {"stadium_id": "nationals", "name": "Nationals Park", "team": "Washington Nationals", "latitude": 38.8730, "longitude": -77.0074, "altitude_ft": 25},
+        {"stadium_id": "orioles", "name": "Oriole Park at Camden Yards", "team": "Baltimore Orioles", "latitude": 39.2840, "longitude": -76.6216, "altitude_ft": 30},
+        {"stadium_id": "padres", "name": "Petco Park", "team": "San Diego Padres", "latitude": 32.7073, "longitude": -117.1566, "altitude_ft": 13},
+        {"stadium_id": "phillies", "name": "Citizens Bank Park", "team": "Philadelphia Phillies", "latitude": 39.9061, "longitude": -75.1665, "altitude_ft": 30},
+        {"stadium_id": "pirates", "name": "PNC Park", "team": "Pittsburgh Pirates", "latitude": 40.4469, "longitude": -80.0057, "altitude_ft": 743},
+        {"stadium_id": "rangers", "name": "Globe Life Field", "team": "Texas Rangers", "latitude": 32.7473, "longitude": -97.0842, "altitude_ft": 616},
+        {"stadium_id": "rays", "name": "Tropicana Field", "team": "Tampa Bay Rays", "latitude": 27.7682, "longitude": -82.6534, "altitude_ft": 44},
+        {"stadium_id": "red_sox", "name": "Fenway Park", "team": "Boston Red Sox", "latitude": 42.3467, "longitude": -71.0972, "altitude_ft": 20},
+        {"stadium_id": "reds", "name": "Great American Ball Park", "team": "Cincinnati Reds", "latitude": 39.0979, "longitude": -84.5071, "altitude_ft": 483},
+        {"stadium_id": "rockies", "name": "Coors Field", "team": "Colorado Rockies", "latitude": 39.7559, "longitude": -104.9942, "altitude_ft": 5200},
+        {"stadium_id": "royals", "name": "Kauffman Stadium", "team": "Kansas City Royals", "latitude": 39.0517, "longitude": -94.4803, "altitude_ft": 750},
+        {"stadium_id": "tigers", "name": "Comerica Park", "team": "Detroit Tigers", "latitude": 42.3390, "longitude": -83.0485, "altitude_ft": 600},
+        {"stadium_id": "twins", "name": "Target Field", "team": "Minnesota Twins", "latitude": 44.9817, "longitude": -93.2778, "altitude_ft": 840},
+        {"stadium_id": "white_sox", "name": "Guaranteed Rate Field", "team": "Chicago White Sox", "latitude": 41.8299, "longitude": -87.6337, "altitude_ft": 595},
+        {"stadium_id": "yankees", "name": "Yankee Stadium", "team": "New York Yankees", "latitude": 40.8296, "longitude": -73.9262, "altitude_ft": 54}
+    ]
+    df = pd.DataFrame(stadium_data)
+    df.to_sql("stg_stadiums", con=engine, if_exists="replace", index=False)
+    print(f"Successfully seeded {len(df)} ballparks into stg_stadiums.")
+
+def ingest_schedules_and_statcast(engine):
+    print("\n[STEP 2] Downloading Calendars & Pitch Telemetry (Historical Backfill 2023-2026)...")
+    
+    seasons = [
+        {"start": "2023-06-12", "end": "2023-06-14", "year": 2023},
+        {"start": "2024-06-10", "end": "2024-06-12", "year": 2024},
+        {"start": "2025-06-09", "end": "2025-06-11", "year": 2025},
+        {"start": "2026-06-08", "end": "2026-06-10", "year": 2026}
+    ]
+    
+    integrated_games = []
+    for chunk in seasons:
+        yr = chunk["year"]
+        url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&season={yr}&gameType=R"
+        try:
+            res = requests.get(url, timeout=12)
+            if res.status_code == 200:
+                for d_node in res.json().get("dates", []):
+                    for gm in d_node.get("games", []):
+                        integrated_games.append({
+                            "game_pk": gm.get("gamePk"),
+                            "game_date": gm.get("gameDate").split("T")[0],
+                            "home_team": gm.get("teams", {}).get("home", {}).get("team", {}).get("name"),
+                            "away_team": gm.get("teams", {}).get("away", {}).get("team", {}).get("name")
+                        })
+        except Exception as e:
+            print(f"Schedule fetch warning for season {yr}: {e}")
+
+    if not integrated_games:
+        print("CRITICAL: Schedule vector is empty. Ingestion halting.")
+        return []
+
+    pd.DataFrame(integrated_games).to_sql("stg_schedules", con=engine, if_exists="replace", index=False)
+    print(f" Saved {len(integrated_games)} records across all seasons into stg_schedules.")
+
+    first_pass = True
+    for chunk in seasons:
+        print(f"Extracting Statcast analytics block for date window: {chunk['start']} -> {chunk['end']}")
+        try:
+            df_sc = statcast(start_dt=chunk["start"], end_dt=chunk["end"])
+            if df_sc is not None and not df_sc.empty:
+                cols = ['game_date', 'batter', 'pitcher', 'events', 'description', 'home_team', 'away_team']
+                df_fil = df_sc[df_sc['events'].notna()][cols]
+                mode = "replace" if first_pass else "append"
+                df_fil.to_sql("stg_statcast_pitches", con=engine, if_exists=mode, index=False)
+                print(f"   Saved {len(df_fil)} telemetry records for this window.")
+                first_pass = False
+        except Exception as e:
+            print(f"Statcast interface warning for timeline {chunk['start']}: {e}")
+
+    return [g["game_pk"] for g in integrated_games if g.get("game_pk")][-30:]
+
+def ingest_boxscore_performance_logs(engine, target_pks):
+    print(f"\n[STEP 3] Running Extraction on {len(target_pks)} Distributed Game Boxscores...")
+    if not target_pks:
+        print("Cannot extract boxscores: Game key list is empty.")
+        return
+
+    flattened_logs = []
+    for pk in target_pks:
+        url = f"https://statsapi.mlb.com/api/v1/game/{pk}/boxscore"
+        try:
+            resp = requests.get(url, timeout=10)
+            if resp.status_code == 200:
+                flattened_logs.append({"game_pk": pk, "log_data": json.dumps(resp.json().get("teams", {}))})
+        except Exception:
+            pass
+        time.sleep(0.05)
         
-    engine = create_engine(db_url)
-    
-    # 1. NORMALIZE VENUES & TEAMS
-    print("Populating Venues & Teams Dimensions...")
-    df_stg_stadiums = pd.read_sql_table("stg_stadiums", con=engine)
-    
-    with engine.begin() as conn:
-        for _, row in df_stg_stadiums.iterrows():
-            conn.execute(
-                text("""
-                    INSERT INTO venues (stadium_key, stadium_name, altitude_ft, latitude, longitude)
-                    VALUES (:key, :name, :alt, :lat, :lon)
-                    ON CONFLICT (stadium_key) DO UPDATE SET altitude_ft = EXCLUDED.altitude_ft
-                """),
-                {"key": row['stadium_id'], "name": row['name'], "alt": row['altitude_ft'], "lat": row['latitude'], "lon": row['longitude']}
-            )
-            conn.execute(
-                text("""
-                    INSERT INTO teams (team_name, home_venue_id)
-                    VALUES (:team, (SELECT venue_id FROM venues WHERE stadium_key = :key))
-                    ON CONFLICT (team_name) DO NOTHING
-                """),
-                {"team": row['team'], "key": row['stadium_id']}
-            )
-
-    # 2. SEED TEAMS DISCOVERED IN SCHEDULES
-    df_sched = pd.read_sql_table("stg_schedules", con=engine)
-    all_teams = set(df_sched['home_team'].dropna().unique()).union(set(df_sched['away_team'].dropna().unique()))
-    with engine.begin() as conn:
-        for t_name in all_teams:
-            conn.execute(text("INSERT INTO teams (team_name) VALUES (:t) ON CONFLICT (team_name) DO NOTHING"), {"t": t_name})
-
-    # 3. NORMALIZE GAMES (Syntax Error Fixed Here!)
-    with engine.begin() as conn:
-        for _, row in df_sched.iterrows():
-            conn.execute(
-                text("""
-                    INSERT INTO games (game_pk, game_date, home_team_id, away_team_id)
-                    VALUES (
-                        :pk, CAST(:dt AS DATE),
-                        (SELECT team_id FROM teams WHERE team_name = :home),
-                        (SELECT team_id FROM teams WHERE team_name = :away)
-                    ) ON CONFLICT (game_pk) DO NOTHING
-                """),
-                {"pk": int(row['game_pk']), "dt": str(row['game_date']), "home": row['home_team'], "away": row['away_team']}
-            )
-
-    # 4. PARSE BOXSCORES: POPULATE PLAYERS AND PERFORMANCE LOOKUPS
-    df_logs = pd.read_sql_table("stg_game_logs", con=engine)
-    
-    for _, row in df_logs.iterrows():
-        g_pk = int(row['game_pk'])
-        box_data = json.loads(row['log_data'])
-        
-        for side in ["home", "away"]:
-            side_node = box_data.get(side, {})
-            t_name = side_node.get("team", {}).get("name")
-            players_node = side_node.get("players", {})
-            
-            for p_key, p_info in players_node.items():
-                person = p_info.get("person", {})
-                p_id = int(person.get("id"))
-                p_name = person.get("fullName")
-                pos = p_info.get("position", {}).get("abbreviation")
-                stats = p_info.get("stats", {})
-                
-                url_p = f"https://statsapi.mlb.com/api/v1/people/{p_id}"
-                bat_side, pitch_hand = "S", "R"
-                try:
-                    res_p = requests.get(url_p, timeout=5)
-                    if res_p.status_code == 200:
-                        meta = res_p.json().get("people", [{}])[0]
-                        bat_side = meta.get("batSide", {}).get("code", "S")
-                        pitch_hand = meta.get("pitchHand", {}).get("code", "R")
-                except Exception:
-                    pass
-                
-                with engine.begin() as conn:
-                    conn.execute(
-                        text("""
-                            INSERT INTO players (player_id, full_name, primary_position, bat_side, pitch_hand)
-                            VALUES (:id, :name, :pos, :bat, :pit)
-                            ON CONFLICT (player_id) DO UPDATE SET primary_position = EXCLUDED.primary_position
-                        """),
-                        {"id": p_id, "name": p_name, "pos": pos, "bat": bat_side, "pit": pitch_hand}
-                    )
-
-                # Process Hitting Metrics
-                bat_stats = stats.get("batting", {})
-                if bat_stats and (bat_stats.get("plateAppearances", 0) > 0):
-                    with engine.begin() as conn:
-                        conn.execute(
-                            text("""
-                                INSERT INTO game_player_performance (
-                                    game_pk, player_id, team_id, player_role, at_bats, runs, hits, rbi, walks, strikeouts
-                                ) VALUES (
-                                    :g_pk, :p_id, (SELECT team_id FROM teams WHERE team_name = :t), 'batter',
-                                    :ab, :r, :h, :rbi, :bb, :so
-                                ) ON CONFLICT (game_pk, player_id, player_role) DO NOTHING
-                            """),
-                            {
-                                "g_pk": g_pk, "p_id": p_id, "t": t_name,
-                                "ab": bat_stats.get("atBats", 0), "r": bat_stats.get("runs", 0),
-                                "h": bat_stats.get("hits", 0), "rbi": bat_stats.get("rbi", 0),
-                                "bb": bat_stats.get("baseOnBalls", 0), "so": bat_stats.get("strikeOuts", 0)
-                            }
-                        )
-
-                # Process Pitching Metrics
-                pit_stats = stats.get("pitching", {})
-                if pit_stats and (pit_stats.get("pitchesThrown", 0) > 0):
-                    with engine.begin() as conn:
-                        conn.execute(
-                            text("""
-                                INSERT INTO game_player_performance (
-                                    game_pk, player_id, team_id, player_role, innings_pitched, hits_allowed, runs_allowed, earned_runs, strikeouts_recorded, pitches_thrown
-                                ) VALUES (
-                                    :g_pk, :p_id, (SELECT team_id FROM teams WHERE team_name = :t), 'pitcher',
-                                    :ip, :ha, :ra, :er, :so, :pt
-                                ) ON CONFLICT (game_pk, player_id, player_role) DO NOTHING
-                            """),
-                            {
-                                "g_pk": g_pk, "p_id": p_id, "t": t_name,
-                                "ip": str(pit_stats.get("inningsPitched", "0.0")), "ha": pit_stats.get("hits", 0),
-                                "ra": pit_stats.get("runs", 0), "er": pit_stats.get("earnedRuns", 0),
-                                "so": pit_stats.get("strikeOuts", 0), "pt": pit_stats.get("pitchesThrown", 0)
-                            }
-                        )
-
-    # 5. GENERATE AT-BAT LOGS
-    print("Normalizing Pitch Tracking -> fact_at_bats...")
-    try:
-        df_pitches = pd.read_sql_table("stg_statcast_pitches", con=engine)
-        with engine.begin() as conn:
-            for _, row in df_pitches.iterrows():
-                b_id, p_id = int(row['batter']), int(row['pitcher'])
-                conn.execute(text("INSERT INTO players (player_id, full_name) VALUES (:id, 'Unknown Base Player') ON CONFLICT DO NOTHING"), {"id": b_id})
-                conn.execute(text("INSERT INTO players (player_id, full_name) VALUES (:id, 'Unknown Base Player') ON CONFLICT DO NOTHING"), {"id": p_id})
-                
-                g_lookup = conn.execute(
-                    text("SELECT game_pk FROM games WHERE game_date = CAST(:dt AS DATE) AND home_team_id = (SELECT team_id FROM teams WHERE team_name = :home)"),
-                    {"dt": str(row['game_date']), "home": row['home_team']}
-                ).fetchone()
-                
-                if g_lookup:
-                    conn.execute(
-                        text("INSERT INTO fact_at_bats (game_pk, batter_id, pitcher_id, event_type, description) VALUES (:g_pk, :b, :p, :ev, :desc)"),
-                        {"g_pk": g_lookup[0], "b": b_id, "p": p_id, "ev": row['events'], "desc": row['description']}
-                    )
-    except Exception as e:
-    print(f"Skipping boxscore lookup for {pk}: {e}") 
-
+    if flattened_logs:
+        pd.DataFrame(flattened_logs).to_sql("stg_game_logs", con=engine, if_exists="replace", index=False)
+        print(f" Streamed {len(flattened_logs)} distinct multi-season boxscores into stg_game_logs.")
 
 if __name__ == "__main__":
-    run_normalization_pipeline()
+    db_engine = get_database_engine()
+    seed_stadium_registry(db_engine)
+    active_pks = ingest_schedules_and_statcast(db_engine)
+    ingest_boxscore_performance_logs(db_engine, active_pks)
+    print("\n INGESTION PIPELINE TASK COMPLETED SUCCESSFULLY.")
