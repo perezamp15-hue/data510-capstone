@@ -4,9 +4,7 @@
     "builder": "NIXPACKS"
   },
   "deploy": {
-    "numReplicas": 1,
-    "restartPolicyOnFailure": "ON_FAILURE",
-    "cron": "0 8 * * *",
-    "startCommand": "python src/ingest.py && python src/ingest_game_logs.py && python src/clean_players.py && python src/upload_to_railway.py"
+    "startCommand": "python src/ingest_pipeline.py && python src/process_3nf_marts.py",
+    "cronSchedule": "0 11 * * *"
   }
 }
