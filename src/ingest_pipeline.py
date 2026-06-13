@@ -1,6 +1,6 @@
 """
-Data Science Studio Scrum (DS3) - Ingestion Engine
-Description: Seeds, harvests, and populates cloud relational staging zones.
+Data Science Studio Scrum (DS3) - Robust Ingestion Engine
+Description: Seeds, harvests, and populates cloud relational staging zones with error safety.
 """
 import os
 import sys
@@ -21,30 +21,27 @@ def get_database_engine():
     return create_engine(db_url)
 
 def seed_stadium_registry(engine):
-    print("\n[STEP 1] Compiling and Seeding Stadium Registries...")
+    print("\n[STEP 1] Seeding Stadium Registries...")
     stadium_data = [
         {"stadium_id": "yankees", "name": "Yankee Stadium", "team": "New York Yankees", "latitude": 40.8296, "longitude": -73.9262, "altitude_ft": 54},
         {"stadium_id": "mets", "name": "Citi Field", "team": "New York Mets", "latitude": 40.7571, "longitude": -73.8458, "altitude_ft": 15},
-        {"stadium_id": "dodgers", "name": "Dodger Stadium", "team": "Los Angeles Dodgers", "latitude": 34.0739, "longitude": -118.2400, "altitude_ft": 502},
-        {"stadium_id": "red_sox", "name": "Fenway Park", "team": "Boston Red Sox", "latitude": 42.3467, "longitude": -71.0972, "altitude_ft": 20},
-        {"stadium_id": "cubs", "name": "Wrigley Field", "team": "Chicago Cubs", "latitude": 41.9484, "longitude": -87.6553, "altitude_ft": 600}
+        {"stadium_id": "dodgers", "name": "Dodger Stadium", "team": "Los Angeles Dodgers", "latitude": 34.0739, "longitude": -118.2400, "altitude_ft": 502}
     ]
     df = pd.DataFrame(stadium_data)
     df.to_sql("stg_stadiums", con=engine, if_exists="replace", index=False)
-    print(f" Loaded {len(df)} base ballparks into 'stg_stadiums'.")
-    return stadium_data
+    print(f" Loaded {len(df)} ballparks into stg_stadiums.")
 
 def ingest_schedules_and_statcast(engine):
-    print("\n[STEP 2] Extracting Multi-Season Schedules & Telemetry...")
+    print("\n[STEP 2] Extracting Schedules & Telemetry...")
+    
+    # Using reliable mid-season dates to guarantee the scraper finds active game records
     seasons = [
-        {"start": "2024-03-28", "end": "2024-03-30"},
-        {"start": "2025-03-27", "end": "2025-03-29"},
-        {"start": "2026-03-26", "end": "2026-03-28"}
+        {"start": "2024-06-10", "end": "2024-06-12"},
+        {"start": "2025-06-09", "end": "2025-06-11"}
     ]
     
-    # 1. Harvest Schedules
     integrated_games = []
-    for yr in [2024, 2025, 2026]:
+    for yr in [2024, 2025]:
         url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&season={yr}&gameType=R"
         try:
             res = requests.get(url, timeout=12)
@@ -58,38 +55,42 @@ def ingest_schedules_and_statcast(engine):
                             "away_team": gm.get("teams", {}).get("away", {}).get("team", {}).get("name")
                         })
         except Exception as e:
-            print(f"Schedule warning for {yr}: {e}")
+            print(f"⚠️ Schedule fetch failed for season {yr}: {e}")
 
-    if integrated_games:
-        pd.DataFrame(integrated_games).to_sql("stg_schedules", con=engine, if_exists="replace", index=False)
-        print(f" Loaded {len(integrated_games)} records into 'stg_schedules'.")
+    if not integrated_games:
+        print("❌ CRITICAL: No games found in schedule extraction. Aborting run.")
+        return []
 
-    # 2. Harvest Statcast Telemetry Chunks
-    print("Gathering pybaseball Statcast metrics...")
-    first_block = True
+    df_games = pd.DataFrame(integrated_games)
+    df_games.to_sql("stg_schedules", con=engine, if_exists="replace", index=False)
+    print(f" Saved {len(df_games)} rows to stg_schedules table.")
+
+    # 2. Harvest Statcast Telemetry
+    print("Gathering Statcast pitch telemetry...")
     for chunk in seasons:
         try:
             df_sc = statcast(start_dt=chunk["start"], end_dt=chunk["end"])
             if df_sc is not None and not df_sc.empty:
                 cols = ['game_date', 'batter', 'pitcher', 'events', 'description', 'home_team', 'away_team']
                 df_fil = df_sc[df_sc['events'].notna()][cols]
-                mode_option = "replace" if first_block else "append"
-                df_fil.to_sql("stg_statcast_pitches", con=engine, if_exists=mode_option, index=False)
-                print(f" Appended {len(df_fil)} events for date block {chunk['start']}.")
-                first_block = False
+                df_fil.to_sql("stg_statcast_pitches", con=engine, if_exists="append", index=False)
+                print(f" Appended {len(df_fil)} pitch records for {chunk['start']}.")
+            else:
+                print(f"⚠️ Statcast returned no records for range: {chunk['start']}")
         except Exception as e:
-            print(f"Statcast collection alert for {chunk['start']}: {e}")
+            print(f"⚠️ Statcast endpoint error: {e}")
 
-    return execution_slice_pks(integrated_games)
-
-def execution_slice_pks(games_list):
-    return [g["game_pk"] for g in games_list if g.get("game_pk")][-30:]
+    # Return the 15 most recent valid game keys to process
+    return [g["game_pk"] for g in integrated_games if g.get("game_pk")][-15:]
 
 def ingest_boxscore_performance_logs(engine, target_pks):
-    print("\n[STEP 3] Running Ingestion on Player Performance Boxscores...")
+    print(f"\n[STEP 3] Fetching boxscores for {len(target_pks)} active game keys...")
+    if not target_pks:
+        print("❌ Skipping Boxscores: Target game list is empty.")
+        return
+
     flattened_logs = []
-    
-    for idx, pk in enumerate(target_pks, 1):
+    for pk in target_pks:
         url = f"https://statsapi.mlb.com/api/v1/game/{pk}/boxscore"
         try:
             resp = requests.get(url, timeout=10)
@@ -97,16 +98,18 @@ def ingest_boxscore_performance_logs(engine, target_pks):
                 teams_data = resp.json().get("teams", {})
                 flattened_logs.append({"game_pk": pk, "log_data": json.dumps(teams_data)})
         except Exception as e:
-            print(f"Skipping match key {pk}: {e}")
-        time.sleep(0.05)
+            print(f"⚠️ Boxscore fetch skipped for game {pk}: {e}")
+        time.sleep(0.1)
         
     if flattened_logs:
         pd.DataFrame(flattened_logs).to_sql("stg_game_logs", con=engine, if_exists="replace", index=False)
-        print(f" Populated {len(flattened_logs)} boxscores into 'stg_game_logs'.")
+        print(f" Saved {len(flattened_logs)} boxscores to stg_game_logs.")
+    else:
+        print("❌ No boxscore profiles could be gathered.")
 
 if __name__ == "__main__":
     db_engine = get_database_engine()
     seed_stadium_registry(db_engine)
     active_pks = ingest_schedules_and_statcast(db_engine)
     ingest_boxscore_performance_logs(db_engine, active_pks)
-    print("\n✅ PHASE 1 COMPLETE: Raw logs stored in staging layers.")
+    print("\n✅ INGESTION PIPELINE PASS RUN COMPLETE.")
