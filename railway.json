@@ -6,7 +6,7 @@
   "deploy": {
     "numReplicas": 1,
     "restartPolicyOnFailure": "ON_FAILURE",
-    "cron": "0 0 * * *",
+    "cron": "0 8 * * *",
     "startCommand": "python src/ingest.py && python src/ingest_game_logs.py && python src/clean_players.py && python src/upload_to_railway.py"
   }
 }
