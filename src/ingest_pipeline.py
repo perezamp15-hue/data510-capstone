@@ -168,7 +168,7 @@ def run_normalization_pipeline():
                         {"g_pk": g_lookup[0], "b": b_id, "p": p_id, "ev": row['events'], "desc": row['description']}
                     )
     except Exception as e:
-
+    print(f"Skipping boxscore lookup for {pk}: {e}") 
 
 
 if __name__ == "__main__":
