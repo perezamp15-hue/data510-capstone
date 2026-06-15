@@ -36,7 +36,7 @@ def stage_core_dataframe(df, table_name):
             df.to_sql(name=table_name, con=core_engine, schema='public', if_exists='append', index=False)
             print(f" Successfully staged {table_name} to Core DB.")
         except Exception as e:
-            print(f"❌ Core DB ingest failed for {table_name}: {e}")
+            print(f"Core DB ingest failed for {table_name}: {e}")
 
 # =========================================================================
 # PITCH DATA TARGET INGEST (Routed to Pitch Engine)
@@ -49,7 +49,7 @@ def stage_pitch_dataframe(df, table_name):
             df.to_sql(name=table_name, con=pitch_engine, schema='public', if_exists='append', index=False)
             print(f" Successfully staged {table_name} to Dedicated Pitch DB.")
         except Exception as e:
-            print(f"❌ Pitch DB ingest failed for {table_name}: {e}")
+            print(f"Pitch DB ingest failed for {table_name}: {e}")
 
 # =========================================================================
 # MODIFIED MODULE 3: DAILY TIMELINE PIPELINE (REDUCED RE-PRINT)
@@ -115,7 +115,7 @@ def merge_staging_to_production():
             with core_engine.begin() as conn:
                 print("\n>>> Executing Core DB Merge Engine... <<<")
                 for q in core_queries: conn.execute(text(q))
-        except Exception as e: print(f"❌ Core DB Merge Error: {e}")
+        except Exception as e: print(f"Core DB Merge Error: {e}")
 
     # 2. Pitch DB Merges
     if pitch_engine:
@@ -132,7 +132,7 @@ def merge_staging_to_production():
             with pitch_engine.begin() as conn:
                 print("\n>>> Executing Pitch DB Merge Engine... <<<")
                 for q in pitch_queries: conn.execute(text(q))
-        except Exception as e: print(f"❌ Pitch DB Merge Error: {e}")
+        except Exception as e: print(f"Pitch DB Merge Error: {e}")
 
 if __name__ == "__main__":
     yesterday_dt = datetime.now() - timedelta(days=1)
