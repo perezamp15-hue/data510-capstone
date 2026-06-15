@@ -1,5 +1,5 @@
-pandas==2.2.1
-requests==2.31.0
-sqlalchemy==2.0.28
-psycopg2-binary==2.9.9
-git+https://github.com/jldbc/pybaseball.git@master
+requests
+pandas
+pybaseball
+psycopg2-binary
+sqlalchemy
