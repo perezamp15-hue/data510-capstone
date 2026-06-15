@@ -6,21 +6,25 @@ from datetime import datetime, timedelta
 from pybaseball import statcast
 from sqlalchemy import create_engine, text
 
+# =========================================================================
 # MULTI-WAREHOUSE CONNECTION SETUP
+# =========================================================================
 def create_railway_engine(env_var_name):
     url = os.environ.get(env_var_name)
     if url and url.startswith("postgres://"):
         url = url.replace("postgres://", "postgresql://", 1)
     return create_engine(url) if url else None
 
-# Connect to BOTH separate destinations
+# Connect to BOTH separate destinations natively managed by Railway variables
 core_engine = create_railway_engine("DATABASE_URL")
 pitch_engine = create_railway_engine("PITCH_DATABASE_URL")
 
 RAW_DATA_DIR = os.path.join("data", "raw")
 os.makedirs(RAW_DATA_DIR, exist_ok=True)
 
-# SYSTEM CONFIGURATION & DICTIONARIES (Scoping Fixed)
+# =========================================================================
+# SYSTEM CONFIGURATION & DICTIONARIES
+# =========================================================================
 VENUE_METADATA = {
     1614: {"name": "Angel Stadium", "lat": 33.7996, "lon": -117.8890},
     3251: {"name": "Chase Field", "lat": 33.4529, "lon": -112.0387},
@@ -57,7 +61,7 @@ VENUE_METADATA = {
 KNOWN_PLAYERS_CACHE = {}
 
 # =========================================================================
-# CORE & PITCH DATA TARGET INGEST HELPERS
+# CORE & PITCH STAGING HELPERS
 # =========================================================================
 def stage_core_dataframe(df, table_name):
     if df.empty: return
@@ -65,9 +69,9 @@ def stage_core_dataframe(df, table_name):
     if core_engine:
         try:
             df.to_sql(name=table_name, con=core_engine, schema='public', if_exists='append', index=False)
-            print(f" Successfully staged {table_name} to Core DB.")
+            print(f" Staged {len(df)} rows to {table_name} inside Core DB.")
         except Exception as e:
-            print(f"Core DB staging failed for {table_name}: {e}")
+            print(f"Core DB staging failure for {table_name}: {e}")
 
 def stage_pitch_dataframe(df, table_name):
     if df.empty: return
@@ -75,12 +79,12 @@ def stage_pitch_dataframe(df, table_name):
     if pitch_engine:
         try:
             df.to_sql(name=table_name, con=pitch_engine, schema='public', if_exists='append', index=False)
-            print(f" Successfully staged {table_name} to Dedicated Pitch DB.")
+            print(f" Staged {len(df)} rows to {table_name} inside Dedicated Pitch DB.")
         except Exception as e:
-            print(f"Pitch DB staging failed for {table_name}: {e}")
+            print(f"Pitch DB staging failure for {table_name}: {e}")
 
 # =========================================================================
-# CORE SUB-FUNCTIONS
+# METADATA & WEATHER API WRAPPERS
 # =========================================================================
 def fetch_player_metadata_cached(player_id):
     if player_id in KNOWN_PLAYERS_CACHE:
@@ -101,7 +105,7 @@ def fetch_player_metadata_cached(player_id):
             KNOWN_PLAYERS_CACHE[player_id] = bio_payload
             return bio_payload
     except Exception as e:
-        print(f" Failed retrieving profile for player {player_id}: {e}")
+        print(f" Error extracting metadata for player {player_id}: {e}")
     return {"player_id": player_id, "bat_side": "U", "throw_hand": "U", "is_active": 0}
 
 def fetch_weather_2hr_intervals(lat, lon, date_str, venue_name):
@@ -125,11 +129,11 @@ def fetch_weather_2hr_intervals(lat, lon, date_str, venue_name):
             df['hour'] = pd.to_datetime(df['timestamp']).dt.hour
             return df[df['hour'] % 2 == 0].drop(columns=['hour'])
     except Exception as e:
-        print(f" Weather query timed out for {venue_name}: {e}")
+        print(f" Weather query encountered timeout bounds for {venue_name}: {e}")
     return pd.DataFrame()
 
 # =========================================================================
-# MODULE 3: DAILY TIMELINE PIPELINE
+# MODULE 1: INGEST CORE API DATA INTO STAGING TABLES
 # =========================================================================
 def run_daily_pipeline(target_date_str):
     master_games = []
@@ -137,13 +141,13 @@ def run_daily_pipeline(target_date_str):
     master_pitchers = []
     master_weather = []
 
-    print(f"\n====== INITIATING TARGET LOG HARVEST FOR DATE: {target_date_str} ======")
+    print(f"\n====== INITIATING CORE TARGET HARVEST FOR DATE: {target_date_str} ======")
     
     url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&startDate={target_date_str}&endDate={target_date_str}&gameType=R"
     try:
         schedule_data = requests.get(url).json()
     except Exception as e:
-        print(f" Could not grab schedule data for {target_date_str}: {e}")
+        print(f" Could not gather schedule index mapping for {target_date_str}: {e}")
         return
 
     for date_node in schedule_data.get("dates", []):
@@ -158,7 +162,7 @@ def run_daily_pipeline(target_date_str):
             home_team = game.get("teams", {}).get("home", {}).get("team", {}).get("name")
             away_team = game.get("teams", {}).get("away", {}).get("team", {}).get("name")
             
-            print(f" Processing Game: {game_id} - {away_team} @ {home_team}")
+            print(f" Parsed Stats Sheet: {game_id} - {away_team} @ {home_team}")
             
             master_games.append({
                 "game_id": game_id, "season": datetime.now().year, "game_date": target_date_str,
@@ -191,7 +195,7 @@ def run_daily_pipeline(target_date_str):
                         
                         fetch_player_metadata_cached(p_id)
                         
-                        # Batters
+                        # Process Batters
                         bat = stats_block.get("batting", {})
                         if bat and bat.get("atBats", 0) > 0:
                             total_hits = bat.get("hits", 0)
@@ -205,7 +209,7 @@ def run_daily_pipeline(target_date_str):
                                 "strikeouts": bat.get("strikeouts"), "walks": bat.get("baseOnBalls")
                             })
                             
-                        # Pitchers
+                        # Process Pitchers
                         pitch = stats_block.get("pitching", {})
                         if pitch and pitch.get("inningsPitched", "0.0") != "0.0":
                             p_hits = pitch.get("hits", 0)
@@ -230,10 +234,10 @@ def run_daily_pipeline(target_date_str):
         stage_core_dataframe(pd.concat(master_weather, ignore_index=True), "stg_fact_weather_2hr_steps")
 
 # =========================================================================
-# MODULE 4: GRANULAR TELEMETRY DAILY METRICS
+# MODULE 2: INGEST STATCAST DATA INTO STAGING TABLES
 # =========================================================================
 def build_pitch_result_tracking_daily(target_date_str):
-    print(f"\n>>> HARVESTING DAILY STATCAST PITCH METRICS FOR: {target_date_str} <<<")
+    print(f"\n====== HARVESTING DAILY STATCAST PITCH METRICS FOR: {target_date_str} ======")
     try:
         raw_pitches = statcast(start_dt=target_date_str, end_dt=target_date_str)
         if not raw_pitches.empty:
@@ -254,15 +258,18 @@ def build_pitch_result_tracking_daily(target_date_str):
                 if runner_col in pitch_tracking_df.columns:
                     pitch_tracking_df[runner_col] = pitch_tracking_df[runner_col].fillna(0).apply(lambda x: 1 if x > 0 else 0)
             
+            # Isolated exclusively to its own destination
             stage_pitch_dataframe(pitch_tracking_df, "stg_fact_pitcher_results_granular")
     except Exception as e:
-        print(f" Failed execution during pitch matrix tracking: {e}")
+        print(f" Failed extraction during pitch matrix parsing: {e}")
 
 # =========================================================================
-# TWO-WAY MERGE ENGINE
+# MODULE 3: THE AUTOMATED STAGING-TO-PRODUCTION TRANSITION ENGINE
 # =========================================================================
 def merge_staging_to_production():
-    # 1. Core DB Merges
+    """Moves daily information seamlessly out of staging and clears the platform logs."""
+    
+    # 1. CORE TRANSACTION UNIT
     if core_engine:
         core_queries = [
             """
@@ -302,13 +309,14 @@ def merge_staging_to_production():
         ]
         try:
             with core_engine.begin() as conn:
-                print("\n>>> Executing Core DB Merge Engine... <<<")
-                for q in core_queries: conn.execute(text(q))
-            print("Core tables cleanly unified.")
+                print("\n>>> Running Core DB Production Transition (Handling Duplicates)... <<<")
+                for q in core_queries: 
+                    conn.execute(text(q))
+            print("Success: Core databases cleanly integrated and staging truncated.")
         except Exception as e: 
-            print(f"Core DB Merge Error: {e}")
+            print(f"Core DB Transition Engine collapsed: {e}")
 
-    # 2. Pitch DB Merges
+    # 2. SEPARATED PITCH TELEMETRY TRANSACTION UNIT
     if pitch_engine:
         pitch_queries = [
             """
@@ -321,20 +329,24 @@ def merge_staging_to_production():
         ]
         try:
             with pitch_engine.begin() as conn:
-                print("\n>>> Executing Pitch DB Merge Engine... <<<")
-                for q in pitch_queries: conn.execute(text(q))
-            print("Pitch tables cleanly unified.")
+                print("\n>>> Running Dedicated Pitch DB Production Transition (Handling Duplicates)... <<<")
+                for q in pitch_queries: 
+                    conn.execute(text(q))
+            print("Success: Statcast telemetry data safely cataloged and staging truncated.")
         except Exception as e: 
-            print(f"Pitch DB Merge Error: {e}")
+            print(f"Pitch DB Transition Engine collapsed: {e}")
 
 # =========================================================================
-# RUNTIME ORCHESTRATOR
+# SYSTEM RUNTIME ENTRYPOINT
 # =========================================================================
 if __name__ == "__main__":
+    # Calculate yesterday's date dynamically at runtime
     yesterday_dt = datetime.now() - timedelta(days=1)
     yesterday_str = yesterday_dt.strftime("%Y-%m-%d")
     
+    # Run data gathers
     run_daily_pipeline(target_date_str=yesterday_str)
     build_pitch_result_tracking_daily(target_date_str=yesterday_str)
     
+    # Execute the final transition into production structures
     merge_staging_to_production()
