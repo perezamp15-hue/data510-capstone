@@ -1,5 +1,4 @@
 import os
-import time
 import requests
 import pandas as pd
 from datetime import datetime, timedelta
@@ -7,7 +6,7 @@ from pybaseball import statcast
 from sqlalchemy import create_engine, text
 
 # =========================================================================
-# MULTI-WAREHOUSE CONNECTION SETUP
+# CONSOLIDATED SINGLE-WAREHOUSE SETUP
 # =========================================================================
 def create_railway_engine(env_var_name):
     url = os.environ.get(env_var_name)
@@ -15,16 +14,13 @@ def create_railway_engine(env_var_name):
         url = url.replace("postgres://", "postgresql://", 1)
     return create_engine(url) if url else None
 
-# Connect to BOTH separate destinations natively managed by Railway variables
-core_engine = create_railway_engine("DATABASE_URL")
-pitch_engine = create_railway_engine("PITCH_DATABASE_URL")
+# Everything targets the primary production DB instance now
+db_engine = create_railway_engine("DATABASE_URL")
 
 RAW_DATA_DIR = os.path.join("data", "raw")
 os.makedirs(RAW_DATA_DIR, exist_ok=True)
 
-# =========================================================================
-# SYSTEM CONFIGURATION & DICTIONARIES
-# =========================================================================
+# Geo coordinates dictionary for venues
 VENUE_METADATA = {
     1614: {"name": "Angel Stadium", "lat": 33.7996, "lon": -117.8890},
     3251: {"name": "Chase Field", "lat": 33.4529, "lon": -112.0387},
@@ -60,31 +56,19 @@ VENUE_METADATA = {
 
 KNOWN_PLAYERS_CACHE = {}
 
-# =========================================================================
-# CORE & PITCH STAGING HELPERS
-# =========================================================================
-def stage_core_dataframe(df, table_name):
+def stage_dataframe(df, table_name):
     if df.empty: return
     df.to_csv(os.path.join(RAW_DATA_DIR, f"{table_name}.csv"), index=False)
-    if core_engine:
+    if db_engine:
         try:
-            df.to_sql(name=table_name, con=core_engine, schema='public', if_exists='append', index=False)
-            print(f" Staged {len(df)} rows to {table_name} inside Core DB.")
+            df.to_sql(name=table_name, con=db_engine, schema='public', if_exists='append', 
+                      index=False, method='multi', chunksize=1000)
+            print(f" Staged {len(df)} rows to {table_name}")
         except Exception as e:
-            print(f"Core DB staging failure for {table_name}: {e}")
-
-def stage_pitch_dataframe(df, table_name):
-    if df.empty: return
-    df.to_csv(os.path.join(RAW_DATA_DIR, f"{table_name}.csv"), index=False)
-    if pitch_engine:
-        try:
-            df.to_sql(name=table_name, con=pitch_engine, schema='public', if_exists='append', index=False)
-            print(f" Staged {len(df)} rows to {table_name} inside Dedicated Pitch DB.")
-        except Exception as e:
-            print(f"Pitch DB staging failure for {table_name}: {e}")
+            print(f"Staging failure for {table_name}: {e}")
 
 # =========================================================================
-# METADATA & WEATHER API WRAPPERS
+# API INTEGRATIONS
 # =========================================================================
 def fetch_player_metadata_cached(player_id):
     if player_id in KNOWN_PLAYERS_CACHE:
@@ -98,7 +82,7 @@ def fetch_player_metadata_cached(player_id):
                 "player_id": player_id, "player_name": person_node.get("fullName"),
                 "birth_date": person_node.get("birthDate"), "height": person_node.get("height"),
                 "weight": person_node.get("weight"), "bat_side": person_node.get("batSide", {}).get("code"),      
-                "throw_hand": person_node.get("pitchHand", {}).get("code"),   
+                "throw_hand": person_node.get("pitchHand", {}).get("code"),  
                 "primary_position": person_node.get("primaryPosition", {}).get("abbreviation"),
                 "is_active": 1 if person_node.get("active") else 0
             }
@@ -106,9 +90,9 @@ def fetch_player_metadata_cached(player_id):
             return bio_payload
     except Exception as e:
         print(f" Error extracting metadata for player {player_id}: {e}")
-    return {"player_id": player_id, "bat_side": "U", "throw_hand": "U", "is_active": 0}
+    return {"player_id": player_id, "player_name": "Unknown Player", "bat_side": "U", "throw_hand": "U", "is_active": 0}
 
-def fetch_weather_2hr_intervals(lat, lon, date_str, venue_name):
+def fetch_weather_2hr_intervals(lat, lon, date_str):
     url = "https://archive-api.open-meteo.com/v1/archive"
     params = {
         "latitude": lat, "longitude": lon, "start_date": date_str, "end_date": date_str,
@@ -123,31 +107,33 @@ def fetch_weather_2hr_intervals(lat, lon, date_str, venue_name):
                 "timestamp": hourly.get("time"), "temperature": hourly.get("temperature_2m"),
                 "humidity": hourly.get("relative_humidity_2m"), "pressure": hourly.get("pressure_msl"),
                 "wind_speed": hourly.get("wind_speed_10m"), "wind_direction": hourly.get("wind_direction_10m"),
-                "precipitation_mm": hourly.get("precipitation"), "venue_name": venue_name
+                "precipitation_mm": hourly.get("precipitation")
             })
-            df['is_raining'] = df['precipitation_mm'].apply(lambda x: 1 if x > 0.0 else 0)
+            df['is_raining'] = df['precipitation_mm'].apply(lambda x: 1 if (x and x > 0.0) else 0)
             df['hour'] = pd.to_datetime(df['timestamp']).dt.hour
             return df[df['hour'] % 2 == 0].drop(columns=['hour'])
     except Exception as e:
-        print(f" Weather query encountered timeout bounds for {venue_name}: {e}")
+        print(f" Weather query encountered timeout bounds: {e}")
     return pd.DataFrame()
 
 # =========================================================================
-# MODULE 1: INGEST CORE API DATA INTO STAGING TABLES
+# CORE EXTRACTION LINE
 # =========================================================================
 def run_daily_pipeline(target_date_str):
     master_games = []
+    master_venues = []
+    master_teams = set()
     master_batters = []
     master_pitchers = []
     master_weather = []
 
-    print(f"\n====== INITIATING CORE TARGET HARVEST FOR DATE: {target_date_str} ======")
-    
+    target_season = int(target_date_str.split("-")[0])
     url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&startDate={target_date_str}&endDate={target_date_str}&gameType=R"
+    
     try:
         schedule_data = requests.get(url).json()
     except Exception as e:
-        print(f" Could not gather schedule index mapping for {target_date_str}: {e}")
+        print(f"Could not get schedule data: {e}")
         return
 
     for date_node in schedule_data.get("dates", []):
@@ -162,11 +148,13 @@ def run_daily_pipeline(target_date_str):
             home_team = game.get("teams", {}).get("home", {}).get("team", {}).get("name")
             away_team = game.get("teams", {}).get("away", {}).get("team", {}).get("name")
             
-            print(f" Parsed Stats Sheet: {game_id} - {away_team} @ {home_team}")
+            master_venues.append({"venue_id": venue_id, "venue_name": venue_name})
+            master_teams.add(home_team)
+            master_teams.add(away_team)
             
             master_games.append({
-                "game_id": game_id, "season": datetime.now().year, "game_date": target_date_str,
-                "game_start_time_utc": start_time_utc, "venue_id": venue_id, "venue_name": venue_name,
+                "game_id": game_id, "season": target_season, "game_date": target_date_str,
+                "game_start_time_utc": start_time_utc, "venue_id": venue_id,
                 "home_team": home_team, "away_team": away_team,
                 "home_score": game.get("teams", {}).get("home", {}).get("score"),
                 "away_score": game.get("teams", {}).get("away", {}).get("score")
@@ -174,7 +162,7 @@ def run_daily_pipeline(target_date_str):
             
             if venue_id in VENUE_METADATA:
                 geo = VENUE_METADATA[venue_id]
-                w_df = fetch_weather_2hr_intervals(geo["lat"], geo["lon"], target_date_str, venue_name)
+                w_df = fetch_weather_2hr_intervals(geo["lat"], geo["lon"], target_date_str)
                 if not w_df.empty:
                     w_df["game_id"] = game_id
                     master_weather.append(w_df)
@@ -190,18 +178,16 @@ def run_daily_pipeline(target_date_str):
                     
                     for p_key, p_info in players_dict.items():
                         p_id = p_info.get("person", {}).get("id")
-                        p_name = p_info.get("person", {}).get("fullName")
                         stats_block = p_info.get("stats", {})
-                        
                         fetch_player_metadata_cached(p_id)
                         
-                        # Process Batters
+                        # Process Batters (3NF: Removed player_name)
                         bat = stats_block.get("batting", {})
                         if bat and bat.get("atBats", 0) > 0:
                             total_hits = bat.get("hits", 0)
                             d, t, hr = bat.get("doubles", 0), bat.get("triples", 0), bat.get("homeRuns", 0)
                             master_batters.append({
-                                "game_id": game_id, "player_id": p_id, "player_name": p_name,
+                                "game_id": game_id, "player_id": p_id,
                                 "team_name": current_team, "opponent_name": opposing_team,
                                 "at_bats": bat.get("atBats"), "rbi": bat.get("rbi", 0),
                                 "singles": total_hits - (d + t + hr), "doubles": d, "triples": t, "home_runs": hr,
@@ -209,13 +195,13 @@ def run_daily_pipeline(target_date_str):
                                 "strikeouts": bat.get("strikeouts"), "walks": bat.get("baseOnBalls")
                             })
                             
-                        # Process Pitchers
+                        # Process Pitchers (3NF: Removed player_name)
                         pitch = stats_block.get("pitching", {})
                         if pitch and pitch.get("inningsPitched", "0.0") != "0.0":
                             p_hits = pitch.get("hits", 0)
                             p_d, p_t, p_hr = pitch.get("doubles", 0), pitch.get("triples", 0), pitch.get("homeRuns", 0)
                             master_pitchers.append({
-                                "game_id": game_id, "player_id": p_id, "player_name": p_name,
+                                "game_id": game_id, "player_id": p_id,
                                 "team_name": current_team, "opponent_name": opposing_team,
                                 "innings_pitched": pitch.get("inningsPitched"), "rbi_allowed": pitch.get("rbi", 0),
                                 "singles_allowed": p_hits - (p_d + p_t + p_hr), "doubles_allowed": p_d,
@@ -226,18 +212,21 @@ def run_daily_pipeline(target_date_str):
                                 "walks_allowed": pitch.get("baseOnBalls")
                             })
                             
-    stage_core_dataframe(pd.DataFrame(master_games), "stg_fact_games_timeline")
-    stage_core_dataframe(pd.DataFrame(master_batters), "stg_fact_boxscore_batters")
-    stage_core_dataframe(pd.DataFrame(master_pitchers), "stg_fact_boxscore_pitchers")
-    stage_core_dataframe(pd.DataFrame(list(KNOWN_PLAYERS_CACHE.values())), "stg_dim_players_metadata")
+    # Bulk stage cleanly to separate staging tables
+    stage_dataframe(pd.DataFrame(master_games), "stg_fact_games")
+    stage_dataframe(pd.DataFrame(master_venues).drop_duplicates(subset=["venue_id"]), "stg_dim_venues")
+    stage_dataframe(pd.DataFrame([{"team_name": t} for t in master_teams]), "stg_dim_teams")
+    stage_dataframe(pd.DataFrame(master_batters), "stg_fact_batting_boxscore")
+    stage_dataframe(pd.DataFrame(master_pitchers), "stg_fact_pitching_boxscore")
+    stage_dataframe(pd.DataFrame(list(KNOWN_PLAYERS_CACHE.values())), "stg_dim_players")
     if master_weather:
-        stage_core_dataframe(pd.concat(master_weather, ignore_index=True), "stg_fact_weather_2hr_steps")
+        stage_dataframe(pd.concat(master_weather, ignore_index=True), "stg_fact_weather")
 
 # =========================================================================
-# MODULE 2: INGEST STATCAST DATA INTO STAGING TABLES
+# STATCAST EXTRACTION LINE
 # =========================================================================
 def build_pitch_result_tracking_daily(target_date_str):
-    print(f"\n====== HARVESTING DAILY STATCAST PITCH METRICS FOR: {target_date_str} ======")
+    print(f"\n====== HARVESTING DAILY STATCAST PITCH METRICS: {target_date_str} ======")
     try:
         raw_pitches = statcast(start_dt=target_date_str, end_dt=target_date_str)
         if not raw_pitches.empty:
@@ -256,97 +245,89 @@ def build_pitch_result_tracking_daily(target_date_str):
             
             for runner_col in ['runner_on_1b', 'runner_on_2b', 'runner_on_3b']:
                 if runner_col in pitch_tracking_df.columns:
-                    pitch_tracking_df[runner_col] = pitch_tracking_df[runner_col].fillna(0).apply(lambda x: 1 if x > 0 else 0)
+                    pitch_tracking_df[runner_col] = pd.to_numeric(pitch_tracking_df[runner_col], errors='coerce').fillna(0)
+                    pitch_tracking_df[runner_col] = pitch_tracking_df[runner_col].apply(lambda x: 1 if x > 0 else 0)
             
-            # Isolated exclusively to its own destination
-            stage_pitch_dataframe(pitch_tracking_df, "stg_fact_pitcher_results_granular")
+            stage_dataframe(pitch_tracking_df, "stg_fact_pitch_telemetry")
     except Exception as e:
-        print(f" Failed extraction during pitch matrix parsing: {e}")
+        print(f"Failed Statcast metrics capture step: {e}")
 
 # =========================================================================
-# MODULE 3: THE AUTOMATED STAGING-TO-PRODUCTION TRANSITION ENGINE
+# PRODUCTION TRANSACTION ATOMIC TRANSITION ENGINE (3NF UPSERTS)
 # =========================================================================
 def merge_staging_to_production():
-    """Moves daily information seamlessly out of staging and clears the platform logs."""
+    if not db_engine: return
     
-    # 1. CORE TRANSACTION UNIT
-    if core_engine:
-        core_queries = [
-            """
-            INSERT INTO fact_games_timeline (game_id, season, game_date, game_start_time_utc, venue_id, venue_name, home_team, away_team, home_score, away_score)
-            SELECT game_id, season, CAST(game_date AS DATE), game_start_time_utc, venue_id, venue_name, home_team, away_team, home_score, away_score 
-            FROM stg_fact_games_timeline
-            ON CONFLICT (game_id) DO UPDATE SET
-                home_score = EXCLUDED.home_score,
-                away_score = EXCLUDED.away_score;
-            """,
-            """
-            INSERT INTO fact_boxscore_batters (game_id, player_id, player_name, team_name, opponent_name, at_bats, rbi, singles, doubles, triples, home_runs, errors, strikeouts, walks)
-            SELECT game_id, player_id, player_name, team_name, opponent_name, at_bats, rbi, singles, doubles, triples, home_runs, errors, strikeouts, walks 
-            FROM stg_fact_boxscore_batters
-            ON CONFLICT (game_id, player_id) DO NOTHING;
-            """,
-            """
-            INSERT INTO fact_boxscore_pitchers (game_id, player_id, player_name, team_name, opponent_name, innings_pitched, rbi_allowed, singles_allowed, doubles_allowed, triples_allowed, home_runs_allowed, errors, pitches_thrown, runs_allowed, earned_runs, strikeouts_thrown, walks_allowed)
-            SELECT game_id, player_id, player_name, team_name, opponent_name, CAST(innings_pitched AS NUMERIC), rbi_allowed, singles_allowed, doubles_allowed, triples_allowed, home_runs_allowed, errors, pitches_thrown, runs_allowed, earned_runs, strikeouts_thrown, walks_allowed 
-            FROM stg_fact_boxscore_pitchers
-            ON CONFLICT (game_id, player_id) DO NOTHING;
-            """,
-            """
-            INSERT INTO dim_players_metadata (player_id, player_name, birth_date, height, weight, bat_side, throw_hand, primary_position, is_active)
-            SELECT player_id, player_name, CAST(birth_date AS DATE), height, weight, bat_side, throw_hand, primary_position, is_active 
-            FROM stg_dim_players_metadata
-            ON CONFLICT (player_id) DO UPDATE SET
-                is_active = EXCLUDED.is_active,
-                height = EXCLUDED.height,
-                weight = EXCLUDED.weight,
-                updated_at = CURRENT_TIMESTAMP;
-            """,
-            "TRUNCATE TABLE stg_fact_games_timeline;",
-            "TRUNCATE TABLE stg_fact_boxscore_batters;",
-            "TRUNCATE TABLE stg_fact_boxscore_pitchers;",
-            "TRUNCATE TABLE stg_dim_players_metadata;"
-        ]
-        try:
-            with core_engine.begin() as conn:
-                print("\n>>> Running Core DB Production Transition (Handling Duplicates)... <<<")
-                for q in core_queries: 
-                    conn.execute(text(q))
-            print("Success: Core databases cleanly integrated and staging truncated.")
-        except Exception as e: 
-            print(f"Core DB Transition Engine collapsed: {e}")
-
-    # 2. SEPARATED PITCH TELEMETRY TRANSACTION UNIT
-    if pitch_engine:
-        pitch_queries = [
-            """
-            INSERT INTO fact_pitcher_results_granular (game_id, pitcher_id, batter_id, pitch_type, pitch_result, pitch_number, release_velocity, spin_rate, horizontal_break, vertical_break, extension, count_balls, count_strikes, runner_on_1b, runner_on_2b, runner_on_3b, batted_ball_type, exit_velocity, launch_angle)
-            SELECT game_id, pitcher_id, batter_id, pitch_type, pitch_result, pitch_number, release_velocity, spin_rate, horizontal_break, vertical_break, extension, count_balls, count_strikes, runner_on_1b, runner_on_2b, runner_on_3b, batted_ball_type, exit_velocity, launch_angle 
-            FROM stg_fact_pitcher_results_granular
-            ON CONFLICT (game_id, pitcher_id, batter_id, pitch_number) DO NOTHING;
-            """,
-            "TRUNCATE TABLE stg_fact_pitcher_results_granular;"
-        ]
-        try:
-            with pitch_engine.begin() as conn:
-                print("\n>>> Running Dedicated Pitch DB Production Transition (Handling Duplicates)... <<<")
-                for q in pitch_queries: 
-                    conn.execute(text(q))
-            print("Success: Statcast telemetry data safely cataloged and staging truncated.")
-        except Exception as e: 
-            print(f"Pitch DB Transition Engine collapsed: {e}")
+    production_queries = [
+        # Lookup Dimensions Insert first (To satisfy Foreign Keys)
+        """
+        INSERT INTO dim_venues (venue_id, venue_name)
+        SELECT venue_id, venue_name FROM stg_dim_venues
+        ON CONFLICT (venue_id) DO UPDATE SET venue_name = EXCLUDED.venue_name;
+        """,
+        """
+        INSERT INTO dim_teams (team_name)
+        SELECT team_name FROM stg_dim_teams
+        ON CONFLICT (team_name) DO NOTHING;
+        """,
+        """
+        INSERT INTO dim_players (player_id, player_name, birth_date, height, weight, bat_side, throw_hand, primary_position, is_active)
+        SELECT player_id, player_name, CAST(birth_date AS DATE), height, weight, bat_side, throw_hand, primary_position, is_active 
+        FROM stg_dim_players
+        ON CONFLICT (player_id) DO UPDATE SET
+            is_active = EXCLUDED.is_active, height = EXCLUDED.height, weight = EXCLUDED.weight;
+        """,
+        # Fact Tables
+        """
+        INSERT INTO fact_games (game_id, season, game_date, game_start_time_utc, venue_id, home_team, away_team, home_score, away_score)
+        SELECT game_id, season, CAST(game_date AS DATE), game_start_time_utc, venue_id, home_team, away_team, home_score, away_score 
+        FROM stg_fact_games
+        ON CONFLICT (game_id) DO UPDATE SET home_score = EXCLUDED.home_score, away_score = EXCLUDED.away_score;
+        """,
+        """
+        INSERT INTO fact_weather (timestamp, temperature, humidity, pressure, wind_speed, wind_direction, precipitation_mm, is_raining, game_id)
+        SELECT CAST(timestamp AS TIMESTAMP), temperature, humidity, pressure, wind_speed, wind_direction, precipitation_mm, is_raining, game_id
+        FROM stg_fact_weather
+        ON CONFLICT (game_id, timestamp) DO NOTHING;
+        """,
+        """
+        INSERT INTO fact_batting_boxscore (game_id, player_id, team_name, opponent_name, at_bats, rbi, singles, doubles, triples, home_runs, errors, strikeouts, walks)
+        SELECT game_id, player_id, team_name, opponent_name, at_bats, rbi, singles, doubles, triples, home_runs, errors, strikeouts, walks 
+        FROM stg_fact_batting_boxscore
+        ON CONFLICT (game_id, player_id) DO NOTHING;
+        """,
+        """
+        INSERT INTO fact_pitching_boxscore (game_id, player_id, team_name, opponent_name, innings_pitched, rbi_allowed, singles_allowed, doubles_allowed, triples_allowed, home_runs_allowed, errors, pitches_thrown, runs_allowed, earned_runs, strikeouts_thrown, walks_allowed)
+        SELECT game_id, player_id, team_name, opponent_name, CAST(innings_pitched AS NUMERIC), rbi_allowed, singles_allowed, doubles_allowed, triples_allowed, home_runs_allowed, errors, pitches_thrown, runs_allowed, earned_runs, strikeouts_thrown, walks_allowed 
+        FROM stg_fact_pitching_boxscore
+        ON CONFLICT (game_id, player_id) DO NOTHING;
+        """,
+        """
+        INSERT INTO fact_pitch_telemetry (game_id, pitcher_id, batter_id, pitch_type, pitch_result, pitch_number, release_velocity, spin_rate, horizontal_break, vertical_break, extension, count_balls, count_strikes, runner_on_1b, runner_on_2b, runner_on_3b, batted_ball_type, exit_velocity, launch_angle)
+        SELECT game_id, pitcher_id, batter_id, pitch_type, pitch_result, pitch_number, release_velocity, spin_rate, horizontal_break, vertical_break, extension, count_balls, count_strikes, runner_on_1b, runner_on_2b, runner_on_3b, batted_ball_type, exit_velocity, launch_angle 
+        FROM stg_fact_pitch_telemetry
+        ON CONFLICT (game_id, pitcher_id, batter_id, pitch_number) DO NOTHING;
+        """,
+        # Truncate all Staging areas cleanly
+        "TRUNCATE TABLE stg_fact_games, stg_dim_venues, stg_dim_teams, stg_fact_batting_boxscore, stg_fact_pitching_boxscore, stg_dim_players, stg_fact_weather, stg_fact_pitch_telemetry;"
+    ]
+    
+    try:
+        with db_engine.begin() as conn:
+            print("\n>>> Executing Unified Atomic 3NF Transaction... <<<")
+            for q in production_queries: 
+                conn.execute(text(q))
+        print("Success: Single WMS pipeline integrated securely.")
+    except Exception as e: 
+        print(f"Transaction Engine failure: {e}")
 
 # =========================================================================
-# SYSTEM RUNTIME ENTRYPOINT
+# RUNNER
 # =========================================================================
 if __name__ == "__main__":
-    # Calculate yesterday's date dynamically at runtime
     yesterday_dt = datetime.now() - timedelta(days=1)
     yesterday_str = yesterday_dt.strftime("%Y-%m-%d")
     
-    # Run data gathers
     run_daily_pipeline(target_date_str=yesterday_str)
     build_pitch_result_tracking_daily(target_date_str=yesterday_str)
-    
-    # Execute the final transition into production structures
     merge_staging_to_production()
