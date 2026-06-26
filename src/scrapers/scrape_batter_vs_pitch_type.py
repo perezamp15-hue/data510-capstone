@@ -1,66 +1,75 @@
 import requests
+import uuid
+# Import your base player scraper module directly
+from src.scrapers.scrape_players import fetch_player_bio
 
-def fetch_batter_pitch_type_splits(player_id: int, season: int):
-    """
-    Scrapes a batter's metrics against discrete pitch types (Fastball, Slider, etc.)
-    including modern plate discipline profiles and tracking values.
-    """
-    # StatsAPI pitch-type split configuration endpoint
-    url = (
-        f"https://statsapi.mlb.com/api/v1/people/{player_id}/stats"
-        f"?stats=statSplits&group=hitting&sitCodes=pFT,pSL,pCU,pCH,pSI&season={season}"
-    )
+def verify_and_register_player(conn, player_id: int):
+    """Ensures player exists in foreign key database before raw play data attempts execution."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM players WHERE player_id = %s;", (player_id,))
+        if cur.fetchone():
+            return # Player verified, safe to proceed
+            
+    # If not found, fetch live from the API and instantly insert them
+    print(f"⚠️ Unrecognized player ID {player_id} discovered in event stream. Registering bio...")
+    player_bio = fetch_player_bio(player_id)
     
+    if player_bio:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO players (player_id, full_name, position_code, bats, throws)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (player_id) DO NOTHING;
+                """,
+                (
+                    player_bio["player_id"], player_bio["full_name"],
+                    player_bio["position_code"], player_bio["bats"], player_bio["throws"]
+                )
+            )
+            conn.commit()
+
+def fetch_game_pitch_by_pitch(conn, game_pk: int):
+    """Scrapes raw Statcast tracking streams with an integrated dynamic roster verification layer."""
+    url = f"https://statsapi.mlb.com/api/v1/game/{game_pk}/playByPlay"
     response = requests.get(url)
-    
-    # Pre-structure dictionary for standard target tracking arrays
-    # Mapping keys directly match MLB pitch types codes:
-    # FT/FF/SI (Fastball/Sinker), SL (Slider), CU (Curveball), CH (Changeup)
-    pitch_type_splits = {
-        "player_id": player_id,
-        "season": season,
-        "pitch_stats": {
-            "Fastball": {"avg": .000, "slg": .000, "whiff_pct": None, "chase_pct": None, "xwoba": None},
-            "Slider":   {"avg": .000, "slg": .000, "whiff_pct": None, "chase_pct": None, "xwoba": None},
-            "Curve":    {"avg": .000, "slg": .000, "whiff_pct": None, "chase_pct": None, "xwoba": None},
-            "Change":   {"avg": .000, "slg": .000, "whiff_pct": None, "chase_pct": None, "xwoba": None},
-            "Sinker":   {"avg": .000, "slg": .000, "whiff_pct": None, "chase_pct": None, "xwoba": None}
-        }
-    }
+    plays_extracted = []
     
     if response.status_code != 200:
-        print(f"Error pulling pitch type splits for batter {player_id}")
-        return pitch_type_splits
+        return plays_extracted
         
-    data = response.json()
-    stats_list = data.get("stats", [])
-    if not stats_list:
-        return pitch_type_splits
-        
-    splits = stats_list[0].get("splits", [])
+    all_plays = response.json().get("allPlays", [])
     
-    for split in splits:
-        code = split.get("split", {}).get("code") # Situation/Pitch identifier code
-        stat = split.get("stat", {})
+    for play in all_plays:
+        matchup = play.get("matchup", {})
+        pitcher_id = matchup.get("pitcher", {}).get("id")
+        batter_id = matchup.get("batter", {}).get("id")
         
-        metrics = {
-            "avg": float(stat.get("avg", ".000")),
-            "slg": float(stat.get("slg", ".000")),
-            "whiff_pct": stat.get("whiffPercentage"),
-            "chase_pct": stat.get("plateDiscipline", {}).get("chasePercentage"),
-            "xwoba": stat.get("expectedMetrics", {}).get("xwoba")
-        }
+        if not pitcher_id or not batter_id:
+            continue
+            
+        # --- ROSTER INTEGRITY SAFEGUARDS ---
+        # Intercept and dynamically append players if missing from database reference layers
+        verify_and_register_player(conn, pitcher_id)
+        verify_and_register_player(conn, batter_id)
         
-        # Map back to our cleaner simulator dictionary format
-        if code in ["pFT", "pFF"]:  # Fastballs
-            pitch_type_splits["pitch_stats"]["Fastball"] = metrics
-        elif code == "pSL":        # Sliders
-            pitch_type_splits["pitch_stats"]["Slider"] = metrics
-        elif code == "pCU":        # Curveballs
-            pitch_type_splits["pitch_stats"]["Curve"] = metrics
-        elif code == "pCH":        # Changeups
-            pitch_type_splits["pitch_stats"]["Change"] = metrics
-        elif code == "pSI":        # Sinkers
-            pitch_type_splits["pitch_stats"]["Sinker"] = metrics
-
-    return pitch_type_splits
+        # Safe to process events now that database constraints are validated
+        events = play.get("playEvents", [])
+        for idx, event in enumerate(events):
+            if event.get("isPitch"):
+                data = event.get("pitchData", {})
+                hit = event.get("hitData", {})
+                
+                plays_extracted.append({
+                    "play_event_id": str(uuid.uuid4()),
+                    "game_pk": game_pk,
+                    "pitcher_id": pitcher_id,
+                    "batter_id": batter_id,
+                    "pitch_type": data.get("type", {}).get("code"),
+                    "velocity": data.get("startSpeed"),
+                    "exit_velocity": hit.get("launchSpeed"),
+                    "launch_angle": hit.get("launchAngle"),
+                    "result": play.get("result", {}).get("description")
+                })
+                
+    return plays_extracted
