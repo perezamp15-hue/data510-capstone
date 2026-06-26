@@ -25,7 +25,7 @@ from src.scrapers.scrape_players import fetch_team_roster
 from src.scrapers.scrape_schedule import fetch_season_schedule
 from src.scrapers.scrape_environmental_weather import fetch_environmental_weather
 # Imported from scrape_boxscore per your renamed commit notes
-from src.scrapers.scrape_boxscore import fetch_game_pitch_by_pitch
+from src.scrapers.scrape_pitch_by_pitch import fetch_game_pitch_by_pitch
 from src.scrapers.scrape_player_fatigue import estimate_player_fatigue
 from src.scrapers.scrape_catcher_framing import fetch_catcher_framing_metrics
 
