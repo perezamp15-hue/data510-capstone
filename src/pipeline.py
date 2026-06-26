@@ -43,8 +43,19 @@ def run_pipeline(season: int):
         # =======================================================
         print(f"Phase 1: Syncing Stadium Master Registry for {season}...")
         stadiums_data = fetch_mlb_stadiums(season=season)
+        from collections import Counter
 
-# Remove duplicate venue_ids
+        counts = Counter(game["game_pk"] for game in schedule_games)
+        
+        duplicates = {k: v for k, v in counts.items() if v > 1}
+
+        print(f"Fetched {len(schedule_games)} schedule records.")
+
+        if duplicates:
+            print(f"Found {len(duplicates)} duplicate game_pks:")
+            for game_pk, count in duplicates.items():
+                print(f"  game_pk={game_pk}, count={count}")
+    
         unique_stadiums = {}
 
         for stadium in stadiums_data:
