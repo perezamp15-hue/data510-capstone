@@ -30,19 +30,7 @@ from src.scrapers.scrape_player_fatigue import estimate_player_fatigue
 from src.scrapers.scrape_catcher_framing import fetch_catcher_framing_metrics
 
 def get_db_connection():
-    print("PGDATABASE:", os.getenv("PGDATABASE"))
-    print("PGHOST:", os.getenv("PGHOST"))
-    print("PGPORT:", os.getenv("PGPORT"))
-    print("PGUSER:", os.getenv("PGUSER"))
-    print("DATABASE_PUBLIC_URL:", os.getenv("DATABASE_PUBLIC_URL"))
-
-    return psycopg2.connect(
-        dbname=os.getenv("DATABASE_PUBLIC_URL") or os.getenv("PGDATABASE"),
-        user=os.getenv("PGUSER"),
-        password=os.getenv("PGPASSWORD"),
-        host=os.getenv("PGHOST"),
-        port=os.getenv("PGPORT")
-    )
+    return psycopg2.connect(os.environ["DATABASE_PUBLIC_URL"])
 
 def run_pipeline(season: int):
     """Executes the complete database sync structured down the relational dependency waterfall."""
