@@ -28,8 +28,11 @@ def calculate_haversine_distance(coord1, coord2):
 
 def estimate_player_fatigue(conn, player_id: int, season: int = None):
     """Analyzes recent travel wear, dynamically lookups coordinates from DB."""
-    if season is None:
-        season = date.today().year
+   # Update function definition to accept target_date
+    for log in logs:
+        log_date = datetime.strptime(log.get("date"), "%Y-%m-%d")
+        if 0 <= (target_date - log_date).days <= 7:
+            # ...
         
     url = f"https://statsapi.mlb.com/api/v1/people/{player_id}/stats?stats=gameLog&group=hitting&season={season}"
     response = requests.get(url)
