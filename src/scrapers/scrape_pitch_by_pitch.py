@@ -1,6 +1,6 @@
 import requests
 import uuid
-from src.scrapers.scrape_players import fetch_team_roster
+# from src.scrapers.scrape_players import fetch_team_roster
 
 def verify_and_register_player(conn, player_id: int):
     """Ensures a player exists in the database before processing their play data."""
