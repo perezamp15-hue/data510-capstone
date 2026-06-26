@@ -43,6 +43,14 @@ def run_pipeline(season: int):
         # =======================================================
         print(f"Phase 1: Syncing Stadium Master Registry for {season}...")
         stadiums_data = fetch_mlb_stadiums(season=season)
+
+# Remove duplicate venue_ids
+        unique_stadiums = {}
+
+        for stadium in stadiums_data:
+            unique_stadiums[stadium["venue_id"]] = stadium
+
+        stadiums_data = list(unique_stadiums.values())
         with conn.cursor() as cur:
             execute_values(cur, """
                 INSERT INTO stadiums (venue_id, stadium_name, city, state, country, latitude, longitude, timezone_offset)
