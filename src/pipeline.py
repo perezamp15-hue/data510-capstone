@@ -1,134 +1,77 @@
 import os
 import sys
-
-# =======================================================
-# PATH IMMUNITY SAFEGUARDS (Must execute first)
-# =======================================================
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) # Maps to /app
-SRC_DIR = os.path.join(BASE_DIR, "src")                               # Maps to /app/src
-
-if BASE_DIR not in sys.path:
-    sys.path.insert(0, BASE_DIR)
-if SRC_DIR not in sys.path:
-    sys.path.insert(0, SRC_DIR)
-
-# =======================================================
-# CORE IMPORTS
-# =======================================================
 import psycopg2
-from datetime import date, timedelta
+from datetime import datetime, date
 from psycopg2.extras import execute_values
 
-# Absolute sub-package imports reflecting your exact GitHub filenames
+# =======================================================
+# CORE IMPORTS (Ensure these match your file structure)
+# =======================================================
 from src.scrapers.scrape_stadium_registry import fetch_mlb_stadiums
 from src.scrapers.scrape_players import fetch_team_roster
 from src.scrapers.scrape_schedule import fetch_season_schedule
 from src.scrapers.scrape_environmental_weather import fetch_environmental_weather
-# Imported from scrape_boxscore per your renamed commit notes
 from src.scrapers.scrape_pitch_by_pitch import fetch_game_pitch_by_pitch
 from src.scrapers.scrape_player_fatigue import estimate_player_fatigue
 from src.scrapers.scrape_catcher_framing import fetch_catcher_framing_metrics
+from src.scrapers.scrape_park_factors import fetch_statcast_park_factors
 
 def get_db_connection():
     return psycopg2.connect(os.environ["DATABASE_PUBLIC_URL"])
 
-def run_pipeline(season: int):
-    """Executes the complete database sync structured down the relational dependency waterfall."""
-    print("Connecting to Postgres Warehouse...")
+def run_pipeline(season: int, target_date: datetime):
+    """
+    Main orchestration function to run the daily data pipeline.
+    """
     conn = get_db_connection()
-    
     try:
-        # =======================================================
-        # PHASE 1: MASTER REFERENCE INGESTION (No Foreign Keys)
-        # =======================================================
-        print(f"Phase 1: Syncing Stadium Master Registry for {season}...")
-        stadiums_data = fetch_mlb_stadiums(season=season)
-        from collections import Counter
-
-        counts = Counter(game["game_pk"] for game in schedule_games)
+        print(f"--- Starting Pipeline for Season: {season} | Target Date: {target_date.date()} ---")
         
-        duplicates = {k: v for k, v in counts.items() if v > 1}
-
-        print(f"Fetched {len(schedule_games)} schedule records.")
-
-        if duplicates:
-            print(f"Found {len(duplicates)} duplicate game_pks:")
-            for game_pk, count in duplicates.items():
-                print(f"  game_pk={game_pk}, count={count}")
-    
-        unique_stadiums = {}
-
-        for stadium in stadiums_data:
-            unique_stadiums[stadium["venue_id"]] = stadium
-
-        stadiums_data = list(unique_stadiums.values())
-        with conn.cursor() as cur:
-            execute_values(cur, """
-                INSERT INTO stadiums (venue_id, stadium_name, city, state, country, latitude, longitude, timezone_offset)
-                VALUES %s ON CONFLICT (venue_id) DO UPDATE SET 
-                    stadium_name = EXCLUDED.stadium_name, timezone_offset = EXCLUDED.timezone_offset;
-            """, [(s['venue_id'], s['stadium_name'], s['city'], s['state'], s['country'], s['latitude'], s['longitude'], s['timezone_offset']) for s in stadiums_data])
-        conn.commit()
-
-        # =======================================================
-        # PHASE 2: SCHEDULES & ROSTERS
-        # =======================================================
-        print("Phase 2: Syncing Schedule Matrix...")
-        schedule_games = fetch_season_schedule(season=season)
-        with conn.cursor() as cur:
-            execute_values(cur, """
-                INSERT INTO schedule (game_pk, season, game_date, home_team_id, away_team_id, home_team_name, away_team_name, venue_id, status)
-                VALUES %s ON CONFLICT (game_pk) DO UPDATE SET status = EXCLUDED.status;
-            """, [(g['game_pk'], g['season'], g['game_date'], g['home_team_id'], g['away_team_id'], g['home_team_name'], g['away_team_name'], g['venue_id'], g['status']) for g in schedule_games])
-        conn.commit()
-
-        # =======================================================
-        # PHASE 3: GAME METADATA, WEATHER, & TRACKING (Yesterday's Games)
-        # =======================================================
-        yesterday_str = (date.today() - timedelta(days=1)).strftime('%Y-%m-%d')
-        print(f"Phase 3: Hydrating completed game datasets for yesterday ({yesterday_str})...")
-        
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT game_pk 
-                FROM schedule 
-                WHERE status = 'Final' 
-                  AND season = %s 
-                  AND game_date = %s;
-            """, (season, yesterday_str))
-            completed_games = [row[0] for row in cur.fetchall()]
-
-        if not completed_games:
-            print("No finalized games found for yesterday. Skipping pitch ingestion.")
-        else:
-            for game_pk in completed_games:
-                weather = fetch_environmental_weather(conn, game_pk)
-                with conn.cursor() as cur:
+        # 1. Update Park Factors (Phase 4 Fix)
+        print("Fetching Park Factors...")
+        park_factors = fetch_statcast_park_factors(season=season)
+        if park_factors:
+            with conn.cursor() as cur:
+                for venue_id, data in park_factors.items():
                     cur.execute("""
-                        INSERT INTO environmental_weather (game_pk, temperature, condition_description, wind_speed_mph, wind_direction)
-                        VALUES (%s, %s, %s, %s, %s) ON CONFLICT (game_pk) DO NOTHING;
-                    """, (weather['game_pk'], weather['temperature'], weather['condition_description'], weather['wind_speed_mph'], weather['wind_direction']))
-                
-                # Executes function out of your newly assigned scrape_boxscore layout
-                pitches = fetch_game_pitch_by_pitch(conn, game_pk)
-                if pitches:
-                    with conn.cursor() as cur:
-                        execute_values(cur, """
-                            INSERT INTO pitch_by_pitch (play_event_id, game_pk, pitcher_id, batter_id, pitch_type, velocity, exit_velocity, launch_angle, result)
-                            VALUES %s ON CONFLICT (play_event_id) DO NOTHING;
-                        """, [(p['play_event_id'], p['game_pk'], p['pitcher_id'], p['batter_id'], p['pitch_type'], p['velocity'], p['exit_velocity'], p['launch_angle'], p['result']) for p in pitches])
-                conn.commit()
+                        INSERT INTO park_factors (venue_id, season, run_factor, singles_factor, doubles_factor, triples_factor, hr_factor, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                        ON CONFLICT (venue_id, season) DO UPDATE SET
+                            run_factor = EXCLUDED.run_factor,
+                            singles_factor = EXCLUDED.singles_factor,
+                            doubles_factor = EXCLUDED.doubles_factor,
+                            triples_factor = EXCLUDED.triples_factor,
+                            hr_factor = EXCLUDED.hr_factor,
+                            updated_at = CURRENT_TIMESTAMP;
+                    """, (venue_id, season, data['run_factor'], data['singles_factor'], data['doubles_factor'], data['triples_factor'], data['hr_factor']))
+        
+        # 2. Update Catcher Framing (Phase 4 Fix)
+        print("Fetching Catcher Framing Metrics...")
+        catcher_metrics = fetch_catcher_framing_metrics(season=season)
+        if catcher_metrics:
+            with conn.cursor() as cur:
+                for pid, data in catcher_metrics.items():
+                    cur.execute("""
+                        INSERT INTO catcher_metrics (player_id, season, framing_runs, strike_percentage, pop_time, caught_stealing_pct, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                        ON CONFLICT (player_id, season) DO UPDATE SET
+                            framing_runs = EXCLUDED.framing_runs,
+                            strike_percentage = EXCLUDED.strike_percentage,
+                            pop_time = EXCLUDED.pop_time,
+                            caught_stealing_pct = EXCLUDED.caught_stealing_pct,
+                            updated_at = CURRENT_TIMESTAMP;
+                    """, (pid, season, data['framing_runs'], data['strike_percentage'], data.get('pop_time'), data.get('caught_stealing_pct')))
 
-        # =======================================================
-        # PHASE 4: PLAYER ANALYTICS & DERIVED FATIGUE MODELS
-        # =======================================================
-        print("Phase 4: Compiling individual performance trends & fatigue coefficients...")
+        # 3. Calculate Player Fatigue with Corrected Time-Travel Logic
+        print("Calculating Player Fatigue Profiles...")
         with conn.cursor() as cur:
-            cur.execute("SELECT DISTINCT player_id FROM players;")
+            cur.execute("SELECT player_id FROM players WHERE status_code = 'A';")
             all_active_players = [row[0] for row in cur.fetchall()]
 
         for player_id in all_active_players:
-            fatigue = estimate_player_fatigue(conn, player_id, season=season)
+            # PASSING THE TARGET DATE IN INSTEAD OF RELYING ON SYSTEM CLOCK
+            fatigue = estimate_player_fatigue(conn, player_id, season=season, target_date=target_date)
+            
             with conn.cursor() as cur:
                 cur.execute("""
                     INSERT INTO batter_fatigue (player_id, consecutive_games_played, travel_distance_last_7_days, sleep_quality_index, rest_days_last_14_days, updated_at)
@@ -140,8 +83,8 @@ def run_pipeline(season: int):
                         rest_days_last_14_days = EXCLUDED.rest_days_last_14_days,
                         updated_at = CURRENT_TIMESTAMP;
                 """, (fatigue['player_id'], fatigue['consecutive_games_played'], fatigue['travel_distance_last_7_days'], fatigue['sleep_quality_index'], fatigue['rest_days_last_14_days']))
+        
         conn.commit()
-
         print("Pipeline execution cycle completed successfully.")
 
     except Exception as e:
@@ -152,5 +95,13 @@ def run_pipeline(season: int):
         conn.close()
 
 if __name__ == "__main__":
+    # Allow for historical backtesting via command line arguments
     target_year = int(sys.argv[1]) if len(sys.argv) > 1 else date.today().year
-    run_pipeline(target_year)
+    
+    # Parse a specific date if provided, otherwise default to today
+    if len(sys.argv) > 2:
+        run_date = datetime.strptime(sys.argv[2], "%Y-%m-%d")
+    else:
+        run_date = datetime.today()
+
+    run_pipeline(season=target_year, target_date=run_date)
