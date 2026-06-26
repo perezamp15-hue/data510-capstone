@@ -30,7 +30,12 @@ from src.scrapers.scrape_player_fatigue import estimate_player_fatigue
 from src.scrapers.scrape_catcher_framing import fetch_catcher_framing_metrics
 
 def get_db_connection():
-    """Establishes connection to the Postgres warehouse using Railway environment variables."""
+    print("PGDATABASE:", os.getenv("PGDATABASE"))
+    print("PGHOST:", os.getenv("PGHOST"))
+    print("PGPORT:", os.getenv("PGPORT"))
+    print("PGUSER:", os.getenv("PGUSER"))
+    print("DATABASE_PUBLIC_URL:", os.getenv("DATABASE_PUBLIC_URL"))
+
     return psycopg2.connect(
         dbname=os.getenv("DATABASE_PUBLIC_URL") or os.getenv("PGDATABASE"),
         user=os.getenv("PGUSER"),
