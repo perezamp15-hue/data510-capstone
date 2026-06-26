@@ -4,6 +4,7 @@ import psycopg2
 from datetime import date
 from psycopg2.extras import execute_values
 
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 # --- reference scrapers---
 from scrapers.scrape_stadium_registry import fetch_mlb_stadiums
 from scrapers.scrape_players import fetch_team_roster
