@@ -26,17 +26,11 @@ def calculate_haversine_distance(coord1, coord2):
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return round(R * c, 1)
 
-def estimate_player_fatigue(conn, player_id: int, season: int = None):
-    """Analyzes recent travel wear, dynamically lookups coordinates from DB."""
-   # Update function definition to accept target_date
-    for log in logs:
-        log_date = datetime.strptime(log.get("date"), "%Y-%m-%d")
-        if 0 <= (target_date - log_date).days <= 7:
-            # ...
-        
-    url = f"https://statsapi.mlb.com/api/v1/people/{player_id}/stats?stats=gameLog&group=hitting&season={season}"
-    response = requests.get(url)
-    
+def estimate_player_fatigue(conn, player_id: int, season: int, target_date: datetime):
+    """
+    Calculates consecutive games played, 7-day travel distance, and sleep disruption.
+    """
+    # 1. Base Payload Structure
     fatigue_profile = {
         "player_id": player_id,
         "consecutive_games_played": 0,
@@ -44,6 +38,9 @@ def estimate_player_fatigue(conn, player_id: int, season: int = None):
         "sleep_quality_index": 100,
         "rest_days_last_14_days": 0
     }
+
+    url = f"https://statsapi.mlb.com/api/v1/people/{player_id}/stats?stats=gameLog&group=hitting&season={season}"
+    response = requests.get(url)
     
     if response.status_code != 200:
         return fatigue_profile
@@ -51,45 +48,31 @@ def estimate_player_fatigue(conn, player_id: int, season: int = None):
     logs = response.json().get("stats", [{}])[0].get("splits", [])
     if not logs:
         return fatigue_profile
-        
-    logs.sort(key=lambda x: x.get("date"), reverse=True)
-    
-    # 1. Consecutive Games
-    current_streak = 0
-    last_date_parsed = None
-    for i, log in enumerate(logs):
-        game_date = datetime.strptime(log.get("date"), "%Y-%m-%d")
-        if i == 0:
-            current_streak = 1
-            last_date_parsed = game_date
-            continue
-        diff = (last_date_parsed - game_date).days
-        if diff == 1:
-            current_streak += 1
-            last_date_parsed = game_date
-        elif diff == 0:
-            continue
-        else:
-            break
-    fatigue_profile["consecutive_games_played"] = current_streak
-    
-    # 2. Dynamic Travel Lookup & Sleep Index
+
+    # Calculate Travel and Sleep metrics using the passed target_date
     total_travel = 0.0
     late_night_flights = 0
-    today = datetime.today()
     venues_visited = []
+    
+    # Sort chronologically to parse consecutive logic
+    logs.sort(key=lambda x: x.get("date"), reverse=True)
     
     for log in logs:
         log_date = datetime.strptime(log.get("date"), "%Y-%m-%d")
-        if (today - log_date).days <= 7:
+        
+        # TIME-TRAVEL BUG FIX: Use target_date instead of datetime.today()
+        if 0 <= (target_date - log_date).days <= 7:
             venues_visited.append({
                 "venue": log.get("venue", {}).get("name"),
                 "is_night": log.get("dayNight") == "Night"
             })
-    venues_visited.reverse()
+            
+            
+    venues_visited.reverse() # Put back into forward chronological order for distance math
     
     for idx in range(len(venues_visited) - 1):
         v1, v2 = venues_visited[idx], venues_visited[idx+1]
+        
         if v1["venue"] != v2["venue"]:
             lat1, lon1, tz1 = get_stadium_coords_from_db(conn, v1["venue"])
             lat2, lon2, tz2 = get_stadium_coords_from_db(conn, v2["venue"])
@@ -102,11 +85,9 @@ def estimate_player_fatigue(conn, player_id: int, season: int = None):
                 late_night_flights += 1
                 
     fatigue_profile["travel_distance_last_7_days"] = round(total_travel, 1)
-    sleep_score = 100 - (late_night_flights * 25) - (max(0, current_streak - 10) * 2)
-    fatigue_profile["sleep_quality_index"] = max(40, sleep_score)
     
-    # 3. Rest Days
-    active_days = {log.get("date") for log in logs if (today - datetime.strptime(log.get("date"), "%Y-%m-%d")).days <= 14}
-    fatigue_profile["rest_days_last_14_days"] = 14 - len(active_days)
+    # Calculate an arbitrary sleep quality penalty
+    sleep_score = 100 - (late_night_flights * 25) - (max(0, total_travel - 2000) * 0.01)
+    fatigue_profile["sleep_quality_index"] = max(0, round(sleep_score))
     
     return fatigue_profile
