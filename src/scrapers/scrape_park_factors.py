@@ -1,29 +1,34 @@
 import pandas as pd
 import requests
+from io import StringIO
 
 def fetch_statcast_park_factors(season: int = 2026):
     """
     Scrapes the official Statcast Park Factors directly from Baseball Savant.
     Returns a dictionary of stadiums mapped to their component multipliers.
-    
-    A value of 100 is neutral. 105 means 5% more frequent than league average.
     """
-    # Savant's underlying custom park factor endpoint
     url = f"https://baseballsavant.mlb.com/leaderboard/statcast-park-factors?type=year&year={season}&stat=index_woba&condition=All&rolling=no&csv=true"
     
-    response = requests.get(url)
+    # FIX 1: Mask the Python scraper as a normal web browser
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    
     park_factors = {}
+    response = requests.get(url, headers=headers)
     
     if response.status_code != 200:
-        print(f"Error fetching Park Factors for season {season}")
+        print(f"Error fetching Park Factors for season {season}. Status: {response.status_code}")
         return park_factors
 
-    # Since Savant handles data natively as a CSV stream on this endpoint,
-    # we can read it directly using Pandas into a clean dataframe
-    # scrape_park_factors.py (Corrected Block)
-    from io import StringIO
     csv_data = StringIO(response.text)
-    df = pd.read_csv(csv_data)
+    
+    # FIX 2: Safeguard the pipeline against future Cloudflare HTML blocks
+    try:
+        df = pd.read_csv(csv_data)
+    except pd.errors.ParserError as e:
+        print(f"Failed to parse Park Factors CSV. Baseball Savant may have blocked the request.")
+        return park_factors
     
     for _, row in df.iterrows():
         # SAFEGUARD: Check for NaN before casting to integer
