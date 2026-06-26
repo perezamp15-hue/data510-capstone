@@ -1,14 +1,34 @@
+import requests
 from datetime import date
 
-# Fetch the actual calendar year automatically at runtime
-CURRENT_YEAR = date.today().year 
+CURRENT_YEAR = date.today().year
 
-# Example modifying the Stadium Registry script from earlier:
 def fetch_mlb_stadiums(season: int = CURRENT_YEAR):
     """
-    Queries the MLB Venue Registry. 
-    Defaults to the absolute current calendar year automatically.
+    Queries the MLB Venue Registry.
+    Defaults to the current MLB season.
     """
     url = f"https://statsapi.mlb.com/api/v1/venues?sportId=1&season={season}"
+
     response = requests.get(url)
-    # ... rest of your code stays exactly the same
+    response.raise_for_status()
+
+    venues = response.json().get("venues", [])
+
+    stadiums = []
+
+    for venue in venues:
+        location = venue.get("location", {})
+
+        stadiums.append({
+            "venue_id": venue.get("id"),
+            "stadium_name": venue.get("name"),
+            "city": location.get("city"),
+            "state": location.get("stateAbbrev"),
+            "country": location.get("country"),
+            "latitude": location.get("defaultCoordinates", {}).get("latitude"),
+            "longitude": location.get("defaultCoordinates", {}).get("longitude"),
+            "timezone_offset": venue.get("timeZone", {}).get("offset"),
+        })
+
+    return stadiums
