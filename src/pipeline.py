@@ -1,20 +1,32 @@
 import os
 import sys
+
+# =======================================================
+# PATH IMMUNITY SAFEGUARDS (Must execute first)
+# =======================================================
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) # Maps to /app
+SRC_DIR = os.path.join(BASE_DIR, "src")                               # Maps to /app/src
+
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+if SRC_DIR not in sys.path:
+    sys.path.insert(0, SRC_DIR)
+
+# =======================================================
+# CORE IMPORTS
+# =======================================================
 import psycopg2
 from datetime import date
 from psycopg2.extras import execute_values
 
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-# --- reference scrapers---
-from scrapers.scrape_stadium_registry import fetch_mlb_stadiums
-from scrapers.scrape_players import fetch_team_roster
-from scrapers.scrape_schedule import fetch_season_schedule
-
-# ---contextual and analytical scrapers---
-from scrapers.scrape_environmental_weather import fetch_environmental_weather
-from scrapers.scrape_pitch_by_pitch import fetch_game_pitch_by_pitch
-from scrapers.scrape_player_fatigue import estimate_player_fatigue
-from scrapers.scrape_catcher_framing import fetch_catcher_framing_metrics
+# Absolute sub-package imports protected by path injections above
+from src.scrapers.scrape_stadium_registry import fetch_mlb_stadiums
+from src.scrapers.scrape_players import fetch_team_roster
+from src.scrapers.scrape_schedule import fetch_season_schedule
+from src.scrapers.scrape_environmental_weather import fetch_environmental_weather
+from src.scrapers.scrape_pitch_by_pitch import fetch_game_pitch_by_pitch
+from src.scrapers.scrape_player_fatigue import estimate_player_fatigue
+from src.scrapers.scrape_catcher_framing import fetch_catcher_framing_metrics
 
 def get_db_connection():
     """Establishes connection to the Postgres warehouse using Railway environment variables."""
@@ -28,7 +40,7 @@ def get_db_connection():
 
 def run_pipeline(season: int):
     """Executes the complete database sync structured down the relational dependency waterfall."""
-    print(f"Connecting to Postgres Warehouse...")
+    print("Connecting to Postgres Warehouse...")
     conn = get_db_connection()
     
     try:
@@ -48,10 +60,9 @@ def run_pipeline(season: int):
         # =======================================================
         # PHASE 2: SCHEDULES & ROSTERS
         # =======================================================
-        print(f"Phase 2: Syncing Schedule Matrix...")
+        print("Phase 2: Syncing Schedule Matrix...")
         schedule_games = fetch_season_schedule(season=season)
         with conn.cursor() as cur:
-            # We filter incoming schedule data to match valid stadiums already captured
             execute_values(cur, """
                 INSERT INTO schedule (game_pk, season, game_date, home_team_id, away_team_id, home_team_name, away_team_name, venue_id, status)
                 VALUES %s ON CONFLICT (game_pk) DO UPDATE SET status = EXCLUDED.status;
@@ -61,8 +72,7 @@ def run_pipeline(season: int):
         # =======================================================
         # PHASE 3: GAME METADATA, WEATHER, & TRACKING (Pitch-by-Pitch)
         # =======================================================
-        print(f"Phase 3: Hydrating completed game datasets...")
-        # Pull games from the DB that are finalized but lack weather tracking records
+        print("Phase 3: Hydrating completed game datasets...")
         with conn.cursor() as cur:
             cur.execute("SELECT game_pk FROM schedule WHERE status = 'Final' AND season = %s;", (season,))
             completed_games = [row[0] for row in cur.fetchall()]
@@ -89,7 +99,7 @@ def run_pipeline(season: int):
         # =======================================================
         # PHASE 4: PLAYER ANALYTICS & DERIVED FATIGUE MODELS
         # =======================================================
-        print(f"Phase 4: Compiling individual performance trends & fatigue coefficients...")
+        print("Phase 4: Compiling individual performance trends & fatigue coefficients...")
         with conn.cursor() as cur:
             cur.execute("SELECT DISTINCT player_id FROM players;")
             all_active_players = [row[0] for row in cur.fetchall()]
