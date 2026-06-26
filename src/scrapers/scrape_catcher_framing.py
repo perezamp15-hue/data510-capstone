@@ -40,12 +40,16 @@ def fetch_catcher_framing_metrics(season: int = 2026):
                 pid = int(row.get('player_id'))
                 if pid in catcher_map:
                     catcher_map[pid]["pop_time"] = float(row.get('pop_time_2b', 0.0))
-                    # Calculate realized runtime success prevention rate
+                    
+                    # SAFEGUARD: Calculate realized runtime success prevention rate safely
                     sb = float(row.get('stolen_bases', 0))
                     cs = float(row.get('caught_stealing', 0))
-                    total = sb + cs
-                    catcher_map[pid]["caught_stealing_pct"] = round((cs / total) * 100, 1) if total > 0 else 0.0
-        except Exception:
-            pass
-            
+                    total_attempts = sb + cs
+                    
+                    # Prevent ZeroDivisionError
+                    catcher_map[pid]["caught_stealing_pct"] = (
+                        (cs / total_attempts) * 100 if total_attempts > 0 else 0.0
+                    )
+        except Exception as e:
+            print(f"Error parsing pop time CSV: {e}")
     return list(catcher_map.values())
