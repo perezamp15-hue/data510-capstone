@@ -16,7 +16,7 @@ if SRC_DIR not in sys.path:
 # CORE IMPORTS
 # =======================================================
 import psycopg2
-from datetime import date
+from datetime import date, timedelta
 from psycopg2.extras import execute_values
 
 # Absolute sub-package imports protected by path injections above
@@ -70,31 +70,43 @@ def run_pipeline(season: int):
         conn.commit()
 
         # =======================================================
-        # PHASE 3: GAME METADATA, WEATHER, & TRACKING (Pitch-by-Pitch)
+        # PHASE 3: GAME METADATA, WEATHER, & TRACKING (Yesterday's Games)
         # =======================================================
-        print("Phase 3: Hydrating completed game datasets...")
+        yesterday_str = (date.today() - timedelta(days=1)).strftime('%Y-%m-%d')
+        print(f"Phase 3: Hydrating completed game datasets for yesterday ({yesterday_str})...")
+        
         with conn.cursor() as cur:
-            cur.execute("SELECT game_pk FROM schedule WHERE status = 'Final' AND season = %s;", (season,))
+            # Isolates processing to only pull detailed stats for games finalized yesterday
+            cur.execute("""
+                SELECT game_pk 
+                FROM schedule 
+                WHERE status = 'Final' 
+                  AND season = %s 
+                  AND game_date = %s;
+            """, (season, yesterday_str))
             completed_games = [row[0] for row in cur.fetchall()]
 
-        for game_pk in completed_games:
-            # Weather updates utilize dynamic roof checking inside the script
-            weather = fetch_environmental_weather(conn, game_pk)
-            with conn.cursor() as cur:
-                cur.execute("""
-                    INSERT INTO environmental_weather (game_pk, temperature, condition_description, wind_speed_mph, wind_direction)
-                    VALUES (%s, %s, %s, %s, %s) ON CONFLICT (game_pk) DO NOTHING;
-                """, (weather['game_pk'], weather['temperature'], weather['condition_description'], weather['wind_speed_mph'], weather['wind_direction']))
-            
-            # Trajectory timeline streams (automates player registration on rookie discoveries)
-            pitches = fetch_game_pitch_by_pitch(conn, game_pk)
-            if pitches:
+        if not completed_games:
+            print("No finalized games found for yesterday. Skipping pitch ingestion.")
+        else:
+            for game_pk in completed_games:
+                # Weather updates utilize dynamic roof checking inside the script
+                weather = fetch_environmental_weather(conn, game_pk)
                 with conn.cursor() as cur:
-                    execute_values(cur, """
-                        INSERT INTO pitch_by_pitch (play_event_id, game_pk, pitcher_id, batter_id, pitch_type, velocity, exit_velocity, launch_angle, result)
-                        VALUES %s ON CONFLICT (play_event_id) DO NOTHING;
-                    """, [(p['play_event_id'], p['game_pk'], p['pitcher_id'], p['batter_id'], p['pitch_type'], p['velocity'], p['exit_velocity'], p['launch_angle'], p['result']) for p in pitches])
-            conn.commit()
+                    cur.execute("""
+                        INSERT INTO environmental_weather (game_pk, temperature, condition_description, wind_speed_mph, wind_direction)
+                        VALUES (%s, %s, %s, %s, %s) ON CONFLICT (game_pk) DO NOTHING;
+                    """, (weather['game_pk'], weather['temperature'], weather['condition_description'], weather['wind_speed_mph'], weather['wind_direction']))
+                
+                # Trajectory timeline streams (automates player registration on rookie discoveries)
+                pitches = fetch_game_pitch_by_pitch(conn, game_pk)
+                if pitches:
+                    with conn.cursor() as cur:
+                        execute_values(cur, """
+                            INSERT INTO pitch_by_pitch (play_event_id, game_pk, pitcher_id, batter_id, pitch_type, velocity, exit_velocity, launch_angle, result)
+                            VALUES %s ON CONFLICT (play_event_id) DO NOTHING;
+                        """, [(p['play_event_id'], p['game_pk'], p['pitcher_id'], p['batter_id'], p['pitch_type'], p['velocity'], p['exit_velocity'], p['launch_angle'], p['result']) for p in pitches])
+                conn.commit()
 
         # =======================================================
         # PHASE 4: PLAYER ANALYTICS & DERIVED FATIGUE MODELS
