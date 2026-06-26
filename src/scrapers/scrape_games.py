@@ -1,39 +1,55 @@
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 
-def fetch_daily_games(game_date: str):
+def fetch_game_information(target_date: str):
     """
-    Fetches game-level metadata, weather, and venue details for a specific date (YYYY-MM-DD).
+    Fetches raw game essentials for a specific date (Format: 'YYYY-MM-DD').
+    Includes logic placeholder for post-game data (attendance, umpires).
     """
-    # MLB StatsAPI schedule endpoint with extra detail flags
-    url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={game_date}&hydrate=weather,venue,linescore,decisions,umpire"
+    # MLB StatsAPI schedule endpoint is completely free and public
+    url = f"https://statsapi.mlb.com/api/v1/schedule/games/?sportId=1&date={target_date}&hydrate=linescore,officials,venue"
     response = requests.get(url)
     
     if response.status_code != 200:
-        print(f"Error fetching schedule for {game_date}")
+        print(f"Failed to fetch games for {target_date}")
         return []
         
     data = response.json()
-    games_extracted = []
+    games_parsed = []
     
-    for date_obj in data.get("dates", []):
-        for game in date_obj.get("games", []):
-            venue = game.get("venue", {})
-            weather = game.get("weather", {})
-            
-            game_info = {
-                "game_pk": game.get("gamePk"),
-                "date": game_date,
-                "game_time": game.get("gameDate"),
-                "stadium_name": venue.get("name"),
-                "stadium_id": venue.get("id"),
-                "home_team_id": game.get("teams", {}).get("home", {}).get("team", {}).get("id"),
-                "away_team_id": game.get("teams", {}).get("away", {}).get("team", {}).get("id"),
-                "temperature": weather.get("temp"),
-                "condition": weather.get("condition"),
-                "wind": weather.get("wind"),  # e.g., "11 mph, In From CF"
-                "roof_type": game.get("roofType")
-            }
-            games_extracted.append(game_info)
-            
-    return games_extracted
+    # Safely navigate JSON structure
+    dates_list = data.get("dates", [])
+    if not dates_list:
+        return []
+        
+    for game in dates_list[0].get("games", []):
+        game_pk = game.get("gamePk")
+        
+        # Parse Time strings safely
+        game_date_utc = game.get("gameDate") # ISO timestamp
+        dt_obj = datetime.strptime(game_date_utc, "%Y-%m-%dT%H:%M:%SZ")
+        
+        # Umpires extraction (only populates post-game)
+        umpires = []
+        officials = game.get("officials", [])
+        for official in officials:
+            if official.get("officialType", {}).get("description") == "Umpire":
+                umpires.append(official.get("official", {}).get("fullName"))
+
+        # Base structure
+        game_info = {
+            "game_pk": game_pk,
+            "game_date": dt_obj.date(),
+            "scheduled_time": dt_obj.time(),
+            "actual_start_time": game.get("linescore", {}).get("resumeTime"), # fallback to box score step if needed
+            "stadium": game.get("venue", {}).get("name"),
+            "home_team": game.get("teams", {}).get("home", {}).get("team", {}).get("name"),
+            "away_team": game.get("teams", {}).get("away", {}).get("team", {}).get("name"),
+            "attendance": game.get("attendance"), # Null if game hasn't happened yet
+            "umpire_crew": umpires,
+            "day_night": game.get("dayNight"),
+            "series_game_number": game.get("seriesGameNumber")
+        }
+        games_parsed.append(game_info)
+        
+    return games_parsed
