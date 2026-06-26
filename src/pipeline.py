@@ -19,12 +19,13 @@ import psycopg2
 from datetime import date, timedelta
 from psycopg2.extras import execute_values
 
-# Absolute sub-package imports protected by path injections above
+# Absolute sub-package imports reflecting your exact GitHub filenames
 from src.scrapers.scrape_stadium_registry import fetch_mlb_stadiums
 from src.scrapers.scrape_players import fetch_team_roster
 from src.scrapers.scrape_schedule import fetch_season_schedule
 from src.scrapers.scrape_environmental_weather import fetch_environmental_weather
-from src.scrapers.scrape_pitch_by_pitch import fetch_game_pitch_by_pitch
+# Imported from scrape_boxscore per your renamed commit notes
+from src.scrapers.scrape_boxscore import fetch_game_pitch_by_pitch
 from src.scrapers.scrape_player_fatigue import estimate_player_fatigue
 from src.scrapers.scrape_catcher_framing import fetch_catcher_framing_metrics
 
@@ -76,7 +77,6 @@ def run_pipeline(season: int):
         print(f"Phase 3: Hydrating completed game datasets for yesterday ({yesterday_str})...")
         
         with conn.cursor() as cur:
-            # Isolates processing to only pull detailed stats for games finalized yesterday
             cur.execute("""
                 SELECT game_pk 
                 FROM schedule 
@@ -90,7 +90,6 @@ def run_pipeline(season: int):
             print("No finalized games found for yesterday. Skipping pitch ingestion.")
         else:
             for game_pk in completed_games:
-                # Weather updates utilize dynamic roof checking inside the script
                 weather = fetch_environmental_weather(conn, game_pk)
                 with conn.cursor() as cur:
                     cur.execute("""
@@ -98,7 +97,7 @@ def run_pipeline(season: int):
                         VALUES (%s, %s, %s, %s, %s) ON CONFLICT (game_pk) DO NOTHING;
                     """, (weather['game_pk'], weather['temperature'], weather['condition_description'], weather['wind_speed_mph'], weather['wind_direction']))
                 
-                # Trajectory timeline streams (automates player registration on rookie discoveries)
+                # Executes function out of your newly assigned scrape_boxscore layout
                 pitches = fetch_game_pitch_by_pitch(conn, game_pk)
                 if pitches:
                     with conn.cursor() as cur:
@@ -117,7 +116,6 @@ def run_pipeline(season: int):
             all_active_players = [row[0] for row in cur.fetchall()]
 
         for player_id in all_active_players:
-            # Fatigue estimations leverage dynamic DB geo-coordinates lookups
             fatigue = estimate_player_fatigue(conn, player_id, season=season)
             with conn.cursor() as cur:
                 cur.execute("""
@@ -142,6 +140,5 @@ def run_pipeline(season: int):
         conn.close()
 
 if __name__ == "__main__":
-    # Fallback default configuration maps runtime smoothly to the current calendar year
     target_year = int(sys.argv[1]) if len(sys.argv) > 1 else date.today().year
     run_pipeline(target_year)
