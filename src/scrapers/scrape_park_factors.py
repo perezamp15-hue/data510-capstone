@@ -20,18 +20,22 @@ def fetch_statcast_park_factors(season: int = 2026):
 
     # Since Savant handles data natively as a CSV stream on this endpoint,
     # we can read it directly using Pandas into a clean dataframe
+    # scrape_park_factors.py (Corrected Block)
     from io import StringIO
     csv_data = StringIO(response.text)
     df = pd.read_csv(csv_data)
     
     for _, row in df.iterrows():
-        # Clean venue name or map it to your stadium identifiers
-        venue_id = int(row.get('venue_id'))
+        # SAFEGUARD: Check for NaN before casting to integer
+        raw_venue = row.get('venue_id')
+        if pd.isna(raw_venue):
+            continue 
+            
+        venue_id = int(raw_venue)
         
         park_factors[venue_id] = {
             "venue_id": venue_id,
             "stadium_name": row.get('venue_name'),
-            # --- Specific Hit Component Multipliers ---
             "run_factor": int(row.get('index_run', 100)),
             "singles_factor": int(row.get('index_1b', 100)),
             "doubles_factor": int(row.get('index_2b', 100)),
