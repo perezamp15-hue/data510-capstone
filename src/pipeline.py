@@ -4,16 +4,16 @@ import psycopg2
 from datetime import date
 from psycopg2.extras import execute_values
 
-# --- Import reference scrapers ---
-from src.scrapers.scrape_stadium_registry import fetch_mlb_stadiums
-from src.scrapers.scrape_players import fetch_team_roster
-from src.scrapers.scrape_schedule import fetch_season_schedule
+# --- reference scrapers---
+from scrapers.scrape_stadium_registry import fetch_mlb_stadiums
+from scrapers.scrape_players import fetch_team_roster
+from scrapers.scrape_schedule import fetch_season_schedule
 
-# --- Import contextual & analytical scrapers ---
-from src.scrapers.scrape_environmental_weather import fetch_environmental_weather
-from src.scrapers.scrape_pitch_by_pitch import fetch_game_pitch_by_pitch
-from src.scrapers.scrape_player_fatigue import estimate_player_fatigue
-from src.scrapers.scrape_catcher_framing import fetch_catcher_framing_metrics
+# ---contextual and analytical scrapers---
+from scrapers.scrape_environmental_weather import fetch_environmental_weather
+from scrapers.scrape_pitch_by_pitch import fetch_game_pitch_by_pitch
+from scrapers.scrape_player_fatigue import estimate_player_fatigue
+from scrapers.scrape_catcher_framing import fetch_catcher_framing_metrics
 
 def get_db_connection():
     """Establishes connection to the Postgres warehouse using Railway environment variables."""
