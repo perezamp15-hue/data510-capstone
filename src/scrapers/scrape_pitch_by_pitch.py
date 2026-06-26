@@ -1,98 +1,81 @@
 import requests
 import uuid
+from src.scrapers.scrape_players import fetch_team_roster
 
-def fetch_pitch_by_pitch_data(game_pk: int):
+def verify_and_register_player(conn, player_id: int):
+    """Ensures a player exists in the database before processing their play data."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM players WHERE player_id = %s;", (player_id,))
+        if cur.fetchone():
+            return # Player is already registered
+            
+    print(f"Unrecognized player ID {player_id} found in event stream. Registering bio...")
+    # Fallback/dynamic insertion registration if a rookie or call-up appears
+    try:
+        url = f"https://statsapi.mlb.com/api/v1/people/{player_id}"
+        res = requests.get(url)
+        if res.status_code == 200:
+            player_data = res.json().get("people", [{}])[0]
+            full_name = player_data.get("fullName", "Unknown Player")
+            position_code = player_data.get("primaryPosition", {}).get("code", "U")
+            bats = player_data.get("batSide", {}).get("code", "R")
+            throws = player_data.get("pitchHand", {}).get("code", "R")
+            
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO players (player_id, full_name, position_code, bats, throws)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (player_id) DO NOTHING;
+                    """,
+                    (player_id, full_name, position_code, bats, throws)
+                )
+                conn.commit()
+    except Exception as e:
+        print(f"Failed to dynamically register player {player_id}: {e}")
+
+def fetch_game_pitch_by_pitch(conn, game_pk: int):
     """
-    Scrapes hyper-detailed Statcast metrics for every single pitch thrown 
-    in a given game using its unique game_pk.
-    
-    Returns:
-        list: A list of dictionaries, where each dict represents one individual pitch.
+    Scrapes raw Statcast tracking streams for pitch trajectories.
+    Exposes the exact function name required by src/pipeline.py.
     """
-    # Hits MLB's comprehensive live feed endpoint for play-by-play timelines
-    url = f"https://statsapi.mlb.com/api/v1/game/{game_pk}/feed/live"
+    url = f"https://statsapi.mlb.com/api/v1/game/{game_pk}/playByPlay"
     response = requests.get(url)
+    plays_extracted = []
     
     if response.status_code != 200:
-        print(f"Failed to fetch live feed for game {game_pk}")
-        return []
+        return plays_extracted
         
-    data = response.json()
-    all_plays = data.get("liveData", {}).get("plays", {}).get("allPlays", [])
+    all_plays = response.json().get("allPlays", [])
     
-    scraped_pitches = []
-    
-    # Loop through every Plate Appearance (At-Bat) in the game
     for play in all_plays:
-        about = play.get("about", {})
-        inning = about.get("inning")
-        half_inning = about.get("halfInning") # 'top' or 'bottom'
-        at_bat_index = about.get("atBatIndex")
-        
         matchup = play.get("matchup", {})
         pitcher_id = matchup.get("pitcher", {}).get("id")
         batter_id = matchup.get("batter", {}).get("id")
         
-        # Loop through every event inside this single At-Bat
-        play_events = play.get("playEvents", [])
-        for event in play_events:
-            # We only care about events that are actual pitches thrown to a batter
-            if not event.get("isPitch", False):
-                continue
-                
-            pitch_data = event.get("pitchData", {})
-            hit_data = event.get("hitData", {})
-            details = event.get("details", {})
+        if not pitcher_id or not batter_id:
+            continue
             
-            # Identify swing and contact states based on pitch description text
-            description = details.get("description", "").lower()
-            
-            # Logical flag evaluations for your simulation engine
-            is_swing = any(x in description for x in ["swinging", "foul", "in play"])
-            is_contact = any(x in description for x in ["foul", "in play"])
-            
-            # Combine everything into a clean, flat dictionary structure
-            pitch_payload = {
-                "game_pk": game_pk,
-                "at_bat_index": at_bat_index,
-                "pitch_number": event.get("pitchNumber"),
-                "inning": inning,
-                "half_inning": half_inning,
-                "pitcher_id": pitcher_id,
-                "batter_id": batter_id,
+        # Ensure database foreign key integrity on the fly
+        verify_and_register_player(conn, pitcher_id)
+        verify_and_register_player(conn, batter_id)
+        
+        events = play.get("playEvents", [])
+        for idx, event in enumerate(events):
+            if event.get("isPitch"):
+                data = event.get("pitchData", {})
+                hit = event.get("hitData", {})
                 
-                # --- Pitch Type & Profiles ---
-                "pitch_type": details.get("type", {}).get("code"), # e.g., 'FF', 'SL', 'CH'
-                "velocity": pitch_data.get("startSpeed"),           # Release Velocity
-                "spin_rate": pitch_data.get("spinRate"),           # Spin Rate (RPM)
+                plays_extracted.append({
+                    "play_event_id": str(uuid.uuid4()),
+                    "game_pk": game_pk,
+                    "pitcher_id": pitcher_id,
+                    "batter_id": batter_id,
+                    "pitch_type": data.get("type", {}).get("code"),
+                    "velocity": data.get("startSpeed"),
+                    "exit_velocity": hit.get("launchSpeed"),
+                    "launch_angle": hit.get("launchAngle"),
+                    "result": play.get("result", {}).get("description")
+                })
                 
-                # --- Trajectory Breaks ---
-                "vertical_break": pitch_data.get("breaks", {}).get("breakVertical"),
-                "horizontal_break": pitch_data.get("breaks", {}).get("breakHorizontal"),
-                
-                # --- Release Variables ---
-                "release_height": pitch_data.get("coordinates", {}).get("z0"), # z0 is release height in feet
-                "release_side": pitch_data.get("coordinates", {}).get("x0"),   # x0 is release side vector
-                "extension": pitch_data.get("extension"),                      # Extension (ft)
-                
-                # --- Strike Zone Plate Location ---
-                "plate_loc_x": pitch_data.get("coordinates", {}).get("pX"), # Horizontal intersection (ft)
-                "plate_loc_z": pitch_data.get("coordinates", {}).get("pZ"), # Height intersection (ft)
-                
-                # --- Action Checkpoints ---
-                "batter_swing": is_swing,
-                "contact": is_contact,
-                
-                # --- Batted Ball Data (Only populates if contact was made/put in play) ---
-                "exit_velocity": hit_data.get("launchSpeed"),
-                "launch_angle": hit_data.get("launchAngle"),
-                "hit_distance": hit_data.get("totalDistance"),
-                
-                # --- Final Result ---
-                "result": details.get("description"), # e.g., "Swinging Strike", "Ball", "In play, run(s)"
-                "play_event_id": event.get("playId")  # Unique string UUID for the unique pitch event
-            }
-            
-            scraped_pitches.append(pitch_payload)
-            
-    return scraped_pitches
+    return plays_extracted
