@@ -1,90 +1,65 @@
 import sys
 import pandas as pd
+from datetime import datetime, timedelta
+import pytz
 from db_client import get_engine, fetch_api_json
 from sqlalchemy import text
 
 def run(target_date=None):
+    if not target_date:
+        local_tz = pytz.timezone('America/Los_Angeles')
+        target_date = (datetime.now(local_tz) - timedelta(days=1)).strftime('%Y-%m-%d')
+    
+    print(f"Running weather ingest for: {target_date}")
     engine = get_engine()
     
-    print("Scanning database for games missing umpire profiles...")
-    try:
-        # Pulls any historical games in your system lacking tracking entries in game_umpires
-        query = """
-            SELECT g.game_pk 
-            FROM games g
-            LEFT JOIN game_umpires gu ON g.game_pk = gu.game_pk
-            WHERE gu.game_pk IS NULL
-            LIMIT 50;
-        """
-        valid_games = pd.read_sql(query, con=engine)['game_pk'].tolist()
-        
-        if not valid_games:
-            print("Database Status: All existing games already have umpire profiles mapped!")
-            return
-            
-        print(f"Found {len(valid_games)} games ready to capture umpire assignments.")
-    except Exception as e:
-        print(f"Database cross-reference failed: {e}")
+    try: 
+        valid_games = pd.read_sql("SELECT game_pk FROM games WHERE game_date = %s", con=engine, params=(target_date,))['game_pk'].tolist()
+    except Exception as e: 
+        print(f"Failed to query games for weather update: {e}")
         return
-        
-    all_umps = {}
-    assignments = []
-    
+
+    weather_count = 0
     for pk in valid_games:
+        # Re-using the reliable boxscore endpoint which contains gameData.weather
         url = f"https://statsapi.mlb.com/api/v1/game/{pk}/boxscore"
         try:
             data = fetch_api_json(url)
-            officials = data.get('officials', [])
+            # The API matches the structural format of feed/live inside the boxscore gameData node
+            info = data.get('gameData', {}).get('weather', {})
+            temp_str = info.get('temp')
             
-            assign = {
+            if not temp_str: 
+                continue
+                
+            raw_wind = info.get('wind', '0')
+            wind_speed = "".join(filter(str.isdigit, str(raw_wind)))
+            wind_speed_int = int(wind_speed) if wind_speed else 0
+
+            w_dict = {
                 "game_pk": int(pk), 
-                "home_plate_ump_id": None, 
-                "first_base_ump_id": None, 
-                "second_base_ump_id": None, 
-                "third_base_ump_id": None
+                "temperature_f": int(temp_str), 
+                "sky_condition": info.get('condition'), 
+                "wind_speed_mph": wind_speed_int, 
+                "wind_direction": info.get('direction')
             }
             
-            for official in officials:
-                pos = official.get('officialType')
-                u_node = official.get('official', {})
-                u_id = u_node.get('id')
-                name = u_node.get('fullName')
-                
-                if not u_id or not name: continue
-                
-                all_umps[int(u_id)] = name
-                if pos == 'Home Plate': assign['home_plate_ump_id'] = int(u_id)
-                elif pos == 'First Base': assign['first_base_ump_id'] = int(u_id)
-                elif pos == 'Second Base': assign['second_base_ump_id'] = int(u_id)
-                elif pos == 'Third Base': assign['third_base_ump_id'] = int(u_id)
-                
-            assignments.append(assign)
-        except Exception:
+            with engine.begin() as conn:
+                conn.execute(text("""
+                    INSERT INTO game_weather (game_pk, temperature_f, sky_condition, wind_speed_mph, wind_direction)
+                    VALUES (:game_pk, :temperature_f, :sky_condition, :wind_speed_mph, :wind_direction)
+                    ON CONFLICT (game_pk) DO UPDATE SET 
+                        temperature_f = EXCLUDED.temperature_f, 
+                        sky_condition = EXCLUDED.sky_condition,
+                        wind_speed_mph = EXCLUDED.wind_speed_mph,
+                        wind_direction = EXCLUDED.wind_direction;
+                """), w_dict)
+            weather_count += 1
+        except Exception as e: 
+            print(f" Weather error for game {pk}: {e}")
             continue
-            
-    if not assignments: 
-        print("No official umpire configurations found inside game boxscores.")
-        return
-    
-    with engine.begin() as conn:
-        for u_id, u_name in all_umps.items():
-            conn.execute(text("""
-                INSERT INTO umpires (umpire_id, umpire_name) 
-                VALUES (:u_id, :u_name) 
-                ON CONFLICT (umpire_id) DO UPDATE SET umpire_name = EXCLUDED.umpire_name;
-            """), {"u_id": u_id, "u_name": u_name})
-            
-        for assign in assignments:
-            conn.execute(text("""
-                INSERT INTO game_umpires (game_pk, home_plate_ump_id, first_base_ump_id, second_base_ump_id, third_base_ump_id)
-                VALUES (:game_pk, :home_plate_ump_id, :first_base_ump_id, :second_base_ump_id, :third_base_ump_id)
-                ON CONFLICT (game_pk) DO UPDATE SET 
-                    home_plate_ump_id = EXCLUDED.home_plate_ump_id, 
-                    first_base_ump_id = EXCLUDED.first_base_ump_id, 
-                    second_base_ump_id = EXCLUDED.second_base_ump_id, 
-                    third_base_ump_id = EXCLUDED.third_base_ump_id;
-            """), assign)
-    print(f"Umpire assignments successfully written for {len(assignments)} games.")
+
+    print(f"Weather updates completed: Ingested {weather_count} records.")
 
 if __name__ == "__main__":
-    run()
+    run(sys.argv[1] if len(sys.argv) > 1 else None)
