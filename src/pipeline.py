@@ -1,9 +1,9 @@
 import os
 import sys
 import psycopg2
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from psycopg2.extras import execute_values
-from datetime import datetime, date
+
 
 # =======================================================
 # CORE IMPORTS (Ensure these match your file structure)
