@@ -34,7 +34,6 @@ def run(start_date=None, end_date=None):
             print("No Statcast data found for this date range.")
             return
 
-        # Clean columns and resolve modern pandas nan variations safely
         df = df.replace({np.nan: None})
         
         engine = get_engine()
@@ -50,18 +49,54 @@ def run(start_date=None, end_date=None):
             print("Statcast data retrieved, but no matching games found in internal database.")
             return
 
-        # 1. Generate unique pitch and plate appearance composite keys dynamically
         if 'pitch_id' not in df.columns or df['pitch_id'].isnull().all():
             df['pitch_id'] = df['game_pk'].astype(str) + "_" + df['pitcher'].astype(str) + "_" + df['batter'].astype(str) + "_" + df['pitch_number'].astype(str)
         
-        # FIX: Baseball Savant labels the half-inning column 'inning_topbot' (e.g., 'Top'/'Bot')
         df['derived_pa_id'] = df['game_pk'].astype(str) + "_" + df['inning_topbot'].fillna('Top').astype(str) + "_" + df['at_bat_number'].astype(str)
 
         pitches_inserted = 0
         pa_inserted = 0
         batted_balls_inserted = 0
 
-        # --- LOOP 1: POPULATE ALL PITCHES (statcast_pitches) ---
+        # --- STEP 1: POPULATE PARENTS FIRST (plate_appearances) ---
+        print("Extracting final matchup events to populate plate_appearances...")
+        pa_df = df.sort_values(by=['game_pk', 'at_bat_number', 'pitch_number'])
+        pa_df = pa_df.groupby('derived_pa_id').last().reset_index()
+
+        with engine.begin() as conn:
+            for _, row in pa_df.iterrows():
+                pa_data = {
+                    "plate_appearance_id": row.get("derived_pa_id"),
+                    "game_pk": int(row.get("game_pk")) if row.get("game_pk") else None,
+                    "batter_id": int(row.get("batter")) if row.get("batter") else None,
+                    "pitcher_id": int(row.get("pitcher")) if row.get("pitcher") else None,
+                    "at_bat_number": int(row.get("at_bat_number")) if row.get("at_bat_number") else 0,
+                    "inning": int(row.get("inning")) if row.get("inning") else 1,
+                    "inning_half": row.get("inning_topbot") if row.get("inning_topbot") else "Top",
+                    "final_event": row.get("events"),                       
+                    "total_pitches_in_pa": int(row.get("pitch_number")) if row.get("pitch_number") else 1,
+                    "final_balls": int(row.get("balls")) if row.get("balls") else 0,
+                    "final_strikes": int(row.get("strikes")) if row.get("strikes") else 0
+                }
+                
+                conn.execute(text("""
+                    INSERT INTO plate_appearances (
+                        plate_appearance_id, game_pk, batter_id, pitcher_id, at_bat_number, 
+                        inning, inning_half, final_event, total_pitches_in_pa, final_balls, final_strikes
+                    )
+                    VALUES (
+                        :plate_appearance_id, :game_pk, :batter_id, :pitcher_id, :at_bat_number, 
+                        :inning, :inning_half, :final_event, :total_pitches_in_pa, :final_balls, :final_strikes
+                    )
+                    ON CONFLICT (plate_appearance_id) DO UPDATE SET
+                        final_event = EXCLUDED.final_event,
+                        total_pitches_in_pa = EXCLUDED.total_pitches_in_pa,
+                        final_balls = EXCLUDED.final_balls,
+                        final_strikes = EXCLUDED.final_strikes;
+                """), pa_data)
+                pa_inserted += 1
+
+        # --- STEP 2: POPULATE CHILDREN SECOND (statcast_pitches) ---
         print("Writing data stream to statcast_pitches...")
         with engine.begin() as conn:
             for _, row in df.iterrows():
@@ -136,52 +171,7 @@ def run(start_date=None, end_date=None):
                 """), pitch_data)
                 pitches_inserted += 1
 
-        # --- LOOP 2: POPULATE UNIQUE MATCHUPS (plate_appearances) ---
-        print("Extracting final matchup events to populate plate_appearances...")
-        pa_df = df.sort_values(by=['game_pk', 'at_bat_number', 'pitch_number'])
-        pa_df = pa_df.groupby('derived_pa_id').last().reset_index()
-
-        with engine.begin() as conn:
-            for _, row in pa_df.iterrows():
-                pa_data = {
-                    "plate_appearance_id": row.get("derived_pa_id"),
-                    "game_pk": int(row.get("game_pk")) if row.get("game_pk") else None,
-                    "batter_id": int(row.get("batter")) if row.get("batter") else None,
-                    "pitcher_id": int(row.get("pitcher")) if row.get("pitcher") else None,
-                    "at_bat_number": int(row.get("at_bat_number")) if row.get("at_bat_number") else 0,
-                    "inning": int(row.get("inning")) if row.get("inning") else 1,
-                    "inning_half": row.get("inning_topbot") if row.get("inning_topbot") else "Top",
-                    "final_event": row.get("events"),                       
-                    "total_pitches_in_pa": int(row.get("pitch_number")) if row.get("pitch_number") else 1,
-                    "final_balls": int(row.get("balls")) if row.get("balls") else 0,
-                    "final_strikes": int(row.get("strikes")) if row.get("strikes") else 0
-                }
-                
-                # Check your actual column schema setup for plate_appearances table
-                # If your table contains extra strict NOT NULLs or alternative naming, modify fields here
-                try:
-                    conn.execute(text("""
-                        INSERT INTO plate_appearances (
-                            plate_appearance_id, game_pk, batter_id, pitcher_id, at_bat_number, 
-                            inning, inning_half, final_event, total_pitches_in_pa, final_balls, final_strikes
-                        )
-                        VALUES (
-                            :plate_appearance_id, :game_pk, :batter_id, :pitcher_id, :at_bat_number, 
-                            :inning, :inning_half, :final_event, :total_pitches_in_pa, :final_balls, :final_strikes
-                        )
-                        ON CONFLICT (plate_appearance_id) DO UPDATE SET
-                            final_event = EXCLUDED.final_event,
-                            total_pitches_in_pa = EXCLUDED.total_pitches_in_pa,
-                            final_balls = EXCLUDED.final_balls,
-                            final_strikes = EXCLUDED.final_strikes;
-                    """), pa_data)
-                    pa_inserted += 1
-                except Exception as pa_err:
-                    # Non-blocking skip if your table schema contains constraint variations
-                    print(f"PA Row skipped: {pa_err}")
-                    continue
-
-        # --- LOOP 3: POPULATE CONTACT OUTCOMES (statcast_batted_balls) ---
+        # --- STEP 3: POPULATE BATTED BALL DETAILS LAST (statcast_batted_balls) ---
         print("Filtering contact tracking elements for statcast_batted_balls...")
         batted_df = df[df['launch_speed'].notnull() | df['launch_angle'].notnull()]
 
