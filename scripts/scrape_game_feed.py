@@ -57,15 +57,8 @@ def run(target_date):
 
         day_night_type = g.get('dayNight')
 
-        # SPLIT TIME FROM DATE AREA
-        raw_game_date = g.get('gameDate') # e.g., "2026-06-22T22:10:00Z"
-        parsed_time = None
-        if raw_game_date and 'T' in raw_game_date:
-            try:
-                # Splits at 'T' -> takes the second part -> removes the timezone 'Z'
-                parsed_time = raw_game_date.split('T')[1].replace('Z', '')
-            except Exception:
-                parsed_time = None
+        # Pass the full timestamp string directly to the TIMESTAMPTZ field
+        raw_game_date = g.get('gameDate') 
 
         # Parse Info array (Attendance and Duration)
         game_info = g.get('boxscore', {}).get('info', [])
@@ -101,7 +94,7 @@ def run(target_date):
             "game_date": target_date,
             "season": season_year,
             "game_type": game_type,
-            "scheduled_start": parsed_time, # Corrected parameter mapping
+            "scheduled_start": raw_game_date, # Raw string matches TIMESTAMPTZ requirements
             "park_id": int(api_venue_id) if api_venue_id else None, 
             "home_team_id": int(home_team_id) if home_team_id else None,
             "away_team_id": int(away_team_id) if away_team_id else None,
@@ -149,7 +142,7 @@ def run(target_date):
         except Exception as db_err:
             print(f"Database write failure for Game {game_pk}: {db_err}")
 
-    print(f"Game Feed Complete: Successfully saved {inserted_games} games with exact scheduled_start profiles.")
+    print(f"Game Feed Complete: Successfully saved {inserted_games} games with proper timestamp formatting.")
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
