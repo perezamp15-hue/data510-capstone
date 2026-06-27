@@ -3,6 +3,7 @@ import os
 import subprocess
 from datetime import datetime, timedelta
 import pytz
+from sqlalchemy import text
 
 base_dir = os.path.dirname(os.path.abspath(__file__))
 scripts_dir = os.path.join(base_dir, 'scripts')
@@ -22,19 +23,66 @@ try:
     import scrape_pitch_arsenal
     import scrape_transactions
     import scrape_umpires
+    from db_client import get_engine
 except ModuleNotFoundError as e:
     print(f"\nCRITICAL IMPORT ERROR: {e}")
     sys.exit(1)
 
 def run_strict_script(script_name, *args):
-    """Executes a foundational script; crashes the pipeline immediately if it fails."""
     script_path = os.path.join(scripts_dir, script_name)
     if not os.path.exists(script_path):
         script_path = os.path.join(base_dir, script_name)
         
     cmd = [sys.executable, script_path] + list(args)
-    print(f"\n🤖 Running Foundation Script: {' '.join(cmd)}")
+    print(f"\nRunning Foundation Script: {' '.join(cmd)}")
     subprocess.run(cmd, check=True)
+
+def populate_downstream_team_tables(target_date):
+    """Reshapes raw data from the games table to fill team_games and team_schedule rows dynamically."""
+    print(f"Processing team performance data rollups for {target_date}...")
+    engine = get_engine()
+    
+    with engine.begin() as conn:
+        # Fetch the games recorded for this date
+        query = text("""
+            SELECT game_pk, season, home_team_id, away_team_id, home_score, away_score, game_type
+            FROM games WHERE game_date = :date
+        """)
+        games = conn.execute(query, {"date": target_date}).fetchall()
+        
+        for g in games:
+            pk, season, home_id, away_id, h_score, a_score, g_type = g
+            
+            # Handle null fields for upcoming or unplayed matches
+            h_score = h_score if h_score is not None else 0
+            a_score = a_score if a_score is not None else 0
+            
+            # Populate team_schedule entries
+            for team_id, opponent_id, is_home in [(home_id, away_id, True), (away_id, home_id, False)]:
+                conn.execute(text("""
+                    INSERT INTO team_schedule (game_pk, season, team_id, opponent_id, is_home, game_type)
+                    VALUES (:pk, :season, :team_id, :opp_id, :is_home, :g_type)
+                    ON CONFLICT (game_pk, team_id) DO NOTHING;
+                """), {"pk": pk, "season": season, "team_id": team_id, "opp_id": opponent_id, "is_home": is_home, "g_type": g_type})
+            
+            # Calculate wins and losses for completed games
+            home_won = h_score > a_score
+            away_won = a_score > h_score
+            
+            # Populate team_games entries
+            conn.execute(text("""
+                INSERT INTO team_games (game_pk, team_id, runs_scored, runs_allowed, is_winner)
+                VALUES (:pk, :team_id, :scored, :allowed, :winner)
+                ON CONFLICT (game_pk, team_id) DO UPDATE SET is_winner = EXCLUDED.is_winner;
+            """), {"pk": pk, "team_id": home_id, "scored": h_score, "allowed": a_score, "winner": home_won})
+            
+            conn.execute(text("""
+                INSERT INTO team_games (game_pk, team_id, runs_scored, runs_allowed, is_winner)
+                VALUES (:pk, :team_id, :scored, :allowed, :winner)
+                ON CONFLICT (game_pk, team_id) DO UPDATE SET is_winner = EXCLUDED.is_winner;
+            """), {"pk": pk, "team_id": away_id, "scored": a_score, "allowed": h_score, "winner": away_won})
+            
+    print("Downstream team performance matrices generated successfully.")
 
 def run_pipeline_for_date(target_date=None):
     if not target_date:
@@ -45,73 +93,46 @@ def run_pipeline_for_date(target_date=None):
     print(f"RUNNING CRON-READY PIPELINE FOR: {target_date}")
     print(f"=========================================\n")
     
-    # -------------------------------------------------------------
-    # PHASE 1: STRICT INGESTION LOOKUPS
-    # -------------------------------------------------------------
     print("--- Phase 1: Syncing Core Indices ---")
     try:
         run_strict_script("scrape_teams.py")
         run_strict_script("scrape_park_info.py")
         run_strict_script("scrape_schedule.py", "2026")
         run_strict_script("scrape_rosters.py")
-        print("Phase 1 lookups complete.")
-    except subprocess.CalledProcessError as e:
-        print(f"\nPIPELINE HALTED: Core base script failed.")
+    except subprocess.CalledProcessError:
         sys.exit(1)
 
-    # -------------------------------------------------------------
-    # PHASE 2: PRIMARY EVENT INGESTION
-    # -------------------------------------------------------------
     print("\n--- Phase 2: Ingesting Daily Game Feeds ---")
-    try: 
-        scrape_game_feed.run(target_date)
-    except Exception as e:
-        print(f"CRITICAL ERROR: Main Boxscore Feed failed for {target_date}: {e}")
-        return
+    try: scrape_game_feed.run(target_date)
+    except Exception as e: print(f"Boxscore Feed failed: {e}"); return
 
-    # -------------------------------------------------------------
-    # PHASE 3: DEPENDENT TELEMETRY & METRICS
-    # -------------------------------------------------------------
     print("\n--- Phase 3: Processing Dependent Telemetry ---")
     try: scrape_statcast.run(target_date, target_date)
     except Exception as e: print(f"Statcast failed: {e}")
-        
     try: scrape_lineups.run(target_date)
     except Exception as e: print(f"Lineups failed: {e}")
-        
     try: scrape_defense.run(target_date)
     except Exception as e: print(f"Defense failed: {e}")
-        
     try: scrape_bullpen.run(target_date)
     except Exception as e: print(f"Bullpen failed: {e}")
-        
     try: scrape_weather.run(target_date)
     except Exception as e: print(f"Weather failed: {e}")
-        
     try: scrape_transactions.run(target_date)
     except Exception as e: print(f"Transactions failed: {e}")
 
-    # -------------------------------------------------------------
-    # PHASE 4: OFFICIATING & SUPPLEMENTAL UPDATES
-    # -------------------------------------------------------------
     print("\n--- Phase 4: Downstream Aggregations & Officiating ---")
     try:
-        # Flexible signature inspection to pass the target date safely
-        import inspect
-        sig = inspect.signature(scrape_umpires.run)
-        if len(sig.parameters) > 0:
-            scrape_umpires.run(target_date)
-        else:
-            scrape_umpires.run()
-        print("Umpires pipeline executed successfully.")
+        scrape_umpires.run(target_date)
     except Exception as e:
-        print(f"Umpires sync failed: {e}")
+        print(f"Umpires pipeline sync failed: {e}")
+
+    try:
+        populate_downstream_team_tables(target_date)
+    except Exception as e:
+        print(f"Internal team aggregations calculation failed: {e}")
         
-    try: 
-        scrape_pitch_arsenal.run()
-        print("Pitch arsenals recalculated.")
-    except Exception as e: 
-        print(f"Arsenal update failed: {e}")
+    try: scrape_pitch_arsenal.run()
+    except Exception as e: print(f"Arsenal update failed: {e}")
 
     print(f"\nPipeline execution successfully finished for window: {target_date}")
 
