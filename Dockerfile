@@ -9,5 +9,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Railway will trigger this exact command whenever the cron schedule hits
+# Force Python to recognize the root directory as an import source
+ENV PYTHONPATH=/app
+
 CMD ["python", "scripts/run_daily_pipeline.py"]
