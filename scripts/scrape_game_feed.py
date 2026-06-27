@@ -7,6 +7,12 @@ def run(target_date):
     print(f"Ingesting main boxscore feed matrices for: {target_date}")
     engine = get_engine()
     
+    # Extract the 4-digit year dynamically from the target date string
+    try:
+        season_year = int(str(target_date).split("-")[0])
+    except Exception:
+        season_year = 2026 # Stable fallback for your current system window
+
     url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={target_date}"
     try:
         schedule_data = fetch_api_json(url)
@@ -38,10 +44,11 @@ def run(target_date):
         if abstract_state not in ['Final', 'Live', 'Preview'] and detailed_state != 'Final':
             continue
 
-        # Cleaned structural dictionary containing only verified core keys
+        # Map all structural keys including the required season integer
         game_data = {
             "game_pk": int(game_pk),
             "game_date": target_date,
+            "season": season_year, # Satisfies the NOT NULL constraint
             "park_id": int(api_venue_id) if api_venue_id else None, 
             "home_team_id": int(home_team_id) if home_team_id else None,
             "away_team_id": int(away_team_id) if away_team_id else None
@@ -49,13 +56,14 @@ def run(target_date):
 
         try:
             with engine.begin() as conn:
-                # Omit game_status entirely to eliminate schema layout friction
+                # Include season in the statement execution
                 conn.execute(text("""
-                    INSERT INTO games (game_pk, game_date, park_id, home_team_id, away_team_id)
-                    VALUES (:game_pk, :game_date, :park_id, :home_team_id, :away_team_id)
+                    INSERT INTO games (game_pk, game_date, season, park_id, home_team_id, away_team_id)
+                    VALUES (:game_pk, :game_date, :season, :park_id, :home_team_id, :away_team_id)
                     ON CONFLICT (game_pk) DO UPDATE SET
                         park_id = EXCLUDED.park_id,
-                        game_date = EXCLUDED.game_date;
+                        game_date = EXCLUDED.game_date,
+                        season = EXCLUDED.season;
                 """), game_data)
             inserted_games += 1
         except Exception as db_err:
