@@ -8,15 +8,9 @@ base_dir = os.path.dirname(os.path.abspath(__file__))
 scripts_dir = os.path.join(base_dir, 'scripts')
 docker_scripts_dir = "/app/scripts"
 
-# Align execution paths
 for path in [scripts_dir, docker_scripts_dir, base_dir]:
     if os.path.exists(path) and path not in sys.path:
         sys.path.insert(0, path)
-
-print("--- Docker Container Path Debugger ---")
-print(f"Current Working Directory: {os.getcwd()}")
-print(f"Calculated Scripts Dir:    {scripts_dir}")
-print("--------------------------------------")
 
 try:
     import scrape_game_feed
@@ -25,27 +19,26 @@ try:
     import scrape_defense
     import scrape_bullpen
     import scrape_weather
-    import scrape_umpires
     import scrape_pitch_arsenal
     import scrape_transactions
+    
+    # NEW IMPORTS FOR EMPTY TABLES
+    import scrape_umpires
+    import scrape_team_games
+    import scrape_team_schedule
 except ModuleNotFoundError as e:
     print(f"\nCRITICAL IMPORT ERROR: {e}")
     sys.exit(1)
 
-def run_isolated_script(script_name, *args):
-    """Executes a scrap script in a clean, isolated shell process."""
+def run_strict_script(script_name, *args):
+    """Executes a foundational script; crashes the pipeline immediately if it fails."""
     script_path = os.path.join(scripts_dir, script_name)
     if not os.path.exists(script_path):
         script_path = os.path.join(base_dir, script_name)
         
     cmd = [sys.executable, script_path] + list(args)
-    print(f"Spawning Process: {' '.join(cmd)}")
-    
-    try:
-        # Stream the script's native terminal output directly into your Railway log screen
-        subprocess.run(cmd, check=True)
-    except subprocess.CalledProcessError as e:
-        print(f"Process {script_name} returned an error. Moving forward with pipeline...")
+    print(f"\n🤖 Running Foundation Script: {' '.join(cmd)}")
+    subprocess.run(cmd, check=True)
 
 def run_pipeline_for_date(target_date=None):
     if not target_date:
@@ -57,15 +50,18 @@ def run_pipeline_for_date(target_date=None):
     print(f"=========================================\n")
     
     # -------------------------------------------------------------
-    # PHASE 1: FORCE FILL BASE CONSTRAINTS (Isolated Shells)
+    # PHASE 1: STRICT INGESTION LOOKUPS
     # -------------------------------------------------------------
     print("--- Phase 1: Syncing Core Indices ---")
-    
-    # Spawning these natively guarantees they load their default configurations cleanly
-    run_isolated_script("scrape_teams.py")
-    run_isolated_script("scrape_park_info.py")
-    run_isolated_script("scrape_schedule.py", "2026")
-    run_isolated_script("scrape_rosters.py")
+    try:
+        run_strict_script("scrape_teams.py")
+        run_strict_script("scrape_park_info.py")
+        run_strict_script("scrape_schedule.py", "2026")
+        run_strict_script("scrape_rosters.py")
+        print("Phase 1 lookups complete.")
+    except subprocess.CalledProcessError as e:
+        print(f"\nPIPELINE HALTED: Core base script failed.")
+        sys.exit(1)
 
     # -------------------------------------------------------------
     # PHASE 2: PRIMARY EVENT INGESTION
@@ -75,47 +71,44 @@ def run_pipeline_for_date(target_date=None):
         scrape_game_feed.run(target_date)
     except Exception as e:
         print(f"CRITICAL ERROR: Main Boxscore Feed failed for {target_date}: {e}")
-        print("Aborting downstream dependencies to prevent data corruption.")
         return
 
     # -------------------------------------------------------------
     # PHASE 3: DEPENDENT TELEMETRY & METRICS
     # -------------------------------------------------------------
     print("\n--- Phase 3: Processing Dependent Telemetry ---")
-    try: 
-        scrape_statcast.run(target_date, target_date)
-    except Exception as e: 
-        print(f"Statcast failed: {e}")
+    try: scrape_statcast.run(target_date, target_date)
+    except Exception as e: print(f"Statcast failed: {e}")
         
-    try: 
-        scrape_lineups.run(target_date)
-    except Exception as e: 
-        print(f"Lineups failed: {e}")
+    try: scrape_lineups.run(target_date)
+    except Exception as e: print(f"Lineups failed: {e}")
         
-    try: 
-        scrape_defense.run(target_date)
-    except Exception as e: 
-        print(f"Defense failed: {e}")
+    try: scrape_defense.run(target_date)
+    except Exception as e: print(f"Defense failed: {e}")
         
-    try: 
-        scrape_bullpen.run(target_date)
-    except Exception as e: 
-        print(f"Bullpen failed: {e}")
+    try: scrape_bullpen.run(target_date)
+    except Exception as e: print(f"Bullpen failed: {e}")
         
-    try: 
-        scrape_weather.run(target_date)
-    except Exception as e: 
-        print(f"Weather failed: {e}")
+    try: scrape_weather.run(target_date)
+    except Exception as e: print(f"Weather failed: {e}")
         
-    try: 
+    try: scrape_transactions.run(target_date)
+    except Exception as e: print(f"Transactions failed: {e}")
+
+    # -------------------------------------------------------------
+    # PHASE 4: OFFICIATING & TEAM PERFORMANCE MATRICES
+    # -------------------------------------------------------------
+    print("\n--- Phase 4: Downstream Aggregations & Officiating ---")
+    try:
         scrape_umpires.run(target_date)
-    except Exception as e: 
-        print(f"Umpires failed: {e}")
-        
-    try: 
-        scrape_transactions.run(target_date)
-    except Exception as e: 
-        print(f"Transactions failed: {e}")
+    except Exception as e:
+        print(f"Umpires sync failed: {e}")
+
+    try:
+        scrape_team_games.run(target_date)
+        scrape_team_schedule.run(target_date)
+    except Exception as e:
+        print(f"Downstream team aggregations failed: {e}")
         
     try: 
         scrape_pitch_arsenal.run()
