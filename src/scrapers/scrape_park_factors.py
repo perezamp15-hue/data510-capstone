@@ -16,25 +16,26 @@ def fetch_statcast_park_factors(season: int = 2026):
         print(f"Error fetching Park Factors for season {season}. Status: {response.status_code}")
         return park_factors
 
-    # --- NEW: Check if Savant returned an HTML error/blank page instead of a CSV ---
-    if "venue_id" not in response.text:
-        print(f"Baseball Savant did not return CSV data for {season}.")
-        print(f"Savant Response Snippet: {response.text[:100].strip()}...")
+    csv_data = StringIO(response.text)
+    
+    # BULLETPROOF FALLBACK LOGIC
+    try:
+        df = pd.read_csv(csv_data)
+        
+        # If the CSV parsed but has zero rows of data (empty 2026 dataset)
+        if df.empty:
+            raise ValueError("Empty Dataframe")
+            
+    except (pd.errors.ParserError, pd.errors.EmptyDataError, ValueError):
+        print(f"No valid CSV data found for {season} (Savant may not have populated it yet).")
         print(f"Fallback triggered: Attempting to pull {season - 1} park factors instead...")
         
-        # Prevent infinite loops, but step back one year
+        # Step back exactly one year to prevent infinite loops
         if season == 2026:
             return fetch_statcast_park_factors(season=season - 1)
         return park_factors
-
-    csv_data = StringIO(response.text)
     
-    try:
-        df = pd.read_csv(csv_data)
-    except pd.errors.ParserError:
-        print(f"Failed to parse Park Factors CSV. Baseball Savant may have blocked the request.")
-        return park_factors
-    
+    # Process the valid dataframe
     for _, row in df.iterrows():
         raw_venue = row.get('venue_id')
         if pd.isna(raw_venue):
