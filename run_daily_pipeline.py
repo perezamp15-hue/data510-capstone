@@ -38,7 +38,7 @@ def run_strict_script(script_name, *args):
     subprocess.run(cmd, check=True)
 
 def populate_downstream_team_tables(target_date):
-    """Reshapes raw data from the games table to fill team_games and team_schedule rows dynamically."""
+    """Reshapes raw data from the games table to fill team_games and team_schedules rows dynamically."""
     print(f"Processing team performance data rollups for {target_date}...")
     engine = get_engine()
     
@@ -57,10 +57,10 @@ def populate_downstream_team_tables(target_date):
             h_score = h_score if h_score is not None else 0
             a_score = a_score if a_score is not None else 0
             
-            # Populate team_schedule entries
+            # Populate team_schedules entries (Fixed to match your plural table name)
             for team_id, opponent_id, is_home in [(home_id, away_id, True), (away_id, home_id, False)]:
                 conn.execute(text("""
-                    INSERT INTO team_schedule (game_pk, season, team_id, opponent_id, is_home, game_type)
+                    INSERT INTO team_schedules (game_pk, season, team_id, opponent_id, is_home, game_type)
                     VALUES (:pk, :season, :team_id, :opp_id, :is_home, :g_type)
                     ON CONFLICT (game_pk, team_id) DO NOTHING;
                 """), {"pk": pk, "season": season, "team_id": team_id, "opp_id": opponent_id, "is_home": is_home, "g_type": g_type})
