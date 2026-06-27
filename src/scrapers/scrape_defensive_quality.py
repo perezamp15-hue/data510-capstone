@@ -1,5 +1,6 @@
 import pandas as pd
 import requests
+from io import StringIO
 
 def fetch_team_defensive_quality(season: int = 2026):
     """
@@ -33,24 +34,36 @@ def fetch_team_defensive_quality(season: int = 2026):
             }
 
     # Step 2: Hydrate with Outs Above Average (OAA) via Savant CSV Stream
-    res_savant = requests.get(savant_url)
+    # FIX: Mask the Python scraper as a normal web browser to bypass Cloudflare
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    
+    res_savant = requests.get(savant_url, headers=headers)
     if res_savant.status_code == 200:
-        from io import StringIO
         csv_data = StringIO(res_savant.text)
         try:
             df = pd.read_csv(csv_data)
             for _, row in df.iterrows():
-                # Savant uses their own mapping keys; filter by matching or parsing names
-                # Alternatively, map using a standard team ID translation dictionary
                 team_name = row.get('team_name')
-                oaa = int(row.get('outs_above_average', 0))
+                
+                # SAFEGUARD: Check for None/NaN before casting to integer
+                raw_oaa = row.get('outs_above_average', 0)
+                if pd.isna(raw_oaa):
+                    oaa = 0
+                else:
+                    oaa = int(raw_oaa)
                 
                 # Match back to payload dictionary
                 for tid, data in defense_payload.items():
                     if data["team_name"].lower() in str(team_name).lower():
                         defense_payload[tid]["outs_above_average"] = oaa
                         break
+        
+        except pd.errors.ParserError:
+            print("Failed to parse Team Defense CSV. Baseball Savant may have blocked the request.")
         except Exception as e:
             print(f"Skipping OAA parser hydration: {e}")
 
+    # Return a clean list of dictionaries for database insertion
     return list(defense_payload.values())
