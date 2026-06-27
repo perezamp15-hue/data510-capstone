@@ -45,44 +45,49 @@ def populate_downstream_team_tables(target_date):
     with engine.begin() as conn:
         # Fetch the games recorded for this date
         query = text("""
-            SELECT game_pk, home_team_id, away_team_id, home_score, away_score, game_type
+            SELECT game_pk, season, home_team_id, away_team_id, home_score, away_score, game_type
             FROM games WHERE game_date = :date
         """)
         games = conn.execute(query, {"date": target_date}).fetchall()
         
         for g in games:
-            pk, home_id, away_id, h_score, a_score, g_type = g
+            pk, season, home_id, away_id, h_score, a_score, g_type = g
             
-            # Handle null fields for upcoming or unplayed matches
+            # Handle null fields for upcoming or unplayed matches safely
             h_score = h_score if h_score is not None else 0
             a_score = a_score if a_score is not None else 0
             
-            # Populate team_schedules entries (Removed season column to match your schema)
-            for team_id, opponent_id, is_home in [(home_id, away_id, True), (away_id, home_id, False)]:
-                conn.execute(text("""
-                    INSERT INTO team_schedules (game_pk, team_id, opponent_id, is_home, game_type)
-                    VALUES (:pk, :team_id, :opp_id, :is_home, :g_type)
-                    ON CONFLICT (game_pk, team_id) DO NOTHING;
-                """), {"pk": pk, "team_id": team_id, "opp_id": opponent_id, "is_home": is_home, "g_type": g_type})
-            
-            # Calculate wins and losses for completed games
-            home_won = h_score > a_score
-            away_won = a_score > h_score
-            
-            # Populate team_games entries
+            # 1. Populate team_schedules (Aligned with your schema: game_pk, season_year, game_type)
             conn.execute(text("""
-                INSERT INTO team_games (game_pk, team_id, runs_scored, runs_allowed, is_winner)
-                VALUES (:pk, :team_id, :scored, :allowed, :winner)
-                ON CONFLICT (game_pk, team_id) DO UPDATE SET is_winner = EXCLUDED.is_winner;
-            """), {"pk": pk, "team_id": home_id, "scored": h_score, "allowed": a_score, "winner": home_won})
+                INSERT INTO team_schedules (game_pk, season_year, game_type)
+                VALUES (:pk, :season_year, :g_type)
+                ON CONFLICT (game_pk) DO NOTHING;
+            """), {"pk": pk, "season_year": season, "g_type": g_type})
             
+            # Calculate win/loss character strings ('W' / 'L')
+            home_result = 'W' if h_score > a_score else 'L'
+            away_result = 'L' if h_score > a_score else 'W'
+            
+            # 2. Populate team_games entries (Aligned with your schema: game_pk, team_id, is_home, runs, game_result)
+            # Home side entry
             conn.execute(text("""
-                INSERT INTO team_games (game_pk, team_id, runs_scored, runs_allowed, is_winner)
-                VALUES (:pk, :team_id, :scored, :allowed, :winner)
-                ON CONFLICT (game_pk, team_id) DO UPDATE SET is_winner = EXCLUDED.is_winner;
-            """), {"pk": pk, "team_id": away_id, "scored": a_score, "allowed": h_score, "winner": away_won})
+                INSERT INTO team_games (game_pk, team_id, is_home, runs, game_result)
+                VALUES (:pk, :team_id, :is_home, :runs, :game_result)
+                ON CONFLICT (game_pk, team_id) DO UPDATE SET 
+                    runs = EXCLUDED.runs,
+                    game_result = EXCLUDED.game_result;
+            """), {"pk": pk, "team_id": home_id, "is_home": True, "runs": h_score, "game_result": home_result})
             
-    print("Base Matrix Synced: Team performance metrics successfully added.")
+            # Away side entry
+            conn.execute(text("""
+                INSERT INTO team_games (game_pk, team_id, is_home, runs, game_result)
+                VALUES (:pk, :team_id, :is_home, :runs, :game_result)
+                ON CONFLICT (game_pk, team_id) DO UPDATE SET 
+                    runs = EXCLUDED.runs,
+                    game_result = EXCLUDED.game_result;
+            """), {"pk": pk, "team_id": away_id, "is_home": False, "runs": a_score, "game_result": away_result})
+            
+    print("Downstream team performance matrices generated successfully.")
 
 def run_pipeline_for_date(target_date=None):
     if not target_date:
