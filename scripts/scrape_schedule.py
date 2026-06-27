@@ -27,6 +27,7 @@ def run(season=2026):
                 
             home_node = game.get('teams', {}).get('home', {})
             away_node = game.get('teams', {}).get('away', {})
+            decisions_node = game.get('decisions', {})
             
             sched_dict = {
                 "game_pk": int(pk),
@@ -36,8 +37,12 @@ def run(season=2026):
                 "home_team_id": int(home_node.get('team', {}).get('id')),
                 "away_team_id": int(away_node.get('team', {}).get('id')),
                 "park_id": int(game.get('venue', {}).get('id')),
-                "home_score": int(home_node.get('score', 0)) if home_node.get('score') is not None else None,
-                "away_score": int(away_node.get('score', 0)) if away_node.get('score') is not None else None
+                "home_score": int(home_node.get('score')) if home_node.get('score') is not None else None,
+                "away_score": int(away_node.get('score')) if away_node.get('score') is not None else None,
+                "day_night_type": game.get('dayNight'),
+                "winning_pitcher_id": int(decisions_node.get('winner', {}).get('id')) if decisions_node.get('winner') else None,
+                "losing_pitcher_id": int(decisions_node.get('loser', {}).get('id')) if decisions_node.get('loser') else None,
+                "save_pitcher_id": int(decisions_node.get('save', {}).get('id')) if decisions_node.get('save') else None
             }
             
             try:
@@ -45,15 +50,21 @@ def run(season=2026):
                     conn.execute(text("""
                         INSERT INTO games (
                             game_pk, game_date, game_type, season, home_team_id, 
-                            away_team_id, park_id, home_score, away_score
+                            away_team_id, park_id, home_score, away_score, day_night_type,
+                            winning_pitcher_id, losing_pitcher_id, save_pitcher_id
                         )
                         VALUES (
                             :game_pk, :game_date, :game_type, :season, :home_team_id, 
-                            :away_team_id, :park_id, :home_score, :away_score
+                            :away_team_id, :park_id, :home_score, :away_score, :day_night_type,
+                            :winning_pitcher_id, :losing_pitcher_id, :save_pitcher_id
                         )
                         ON CONFLICT (game_pk) DO UPDATE SET
                             home_score = EXCLUDED.home_score,
-                            away_score = EXCLUDED.away_score;
+                            away_score = EXCLUDED.away_score,
+                            day_night_type = EXCLUDED.day_night_type,
+                            winning_pitcher_id = EXCLUDED.winning_pitcher_id,
+                            losing_pitcher_id = EXCLUDED.losing_pitcher_id,
+                            save_pitcher_id = EXCLUDED.save_pitcher_id;
                     """), sched_dict)
                 calendar_count += 1
             except Exception:
