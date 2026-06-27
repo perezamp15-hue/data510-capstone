@@ -118,7 +118,7 @@ def populate_downstream_team_tables(target_date):
 def run_pipeline_for_date(target_date=None):
     if not target_date:
         local_tz = pytz.timezone('America/Los_Angeles')
-        target_date = (datetime.now(local_tz) - timedelta(days=5)).strftime('%Y-%m-%d')
+        target_date = (datetime.now(local_tz) - timedelta(days=1)).strftime('%Y-%m-%d')
         
     print(f"\n=========================================")
     print(f"RUNNING CRON-READY PIPELINE FOR: {target_date}")
