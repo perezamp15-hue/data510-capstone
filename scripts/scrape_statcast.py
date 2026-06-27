@@ -54,8 +54,8 @@ def run(start_date=None, end_date=None):
         if 'pitch_id' not in df.columns or df['pitch_id'].isnull().all():
             df['pitch_id'] = df['game_pk'].astype(str) + "_" + df['pitcher'].astype(str) + "_" + df['batter'].astype(str) + "_" + df['pitch_number'].astype(str)
         
-        # Plate Appearance ID Composite tracking rule: {game_pk}_{inning_half}_{at_bat_number}
-        df['derived_pa_id'] = df['game_pk'].astype(str) + "_" + df['inning_half'].fillna('Top').astype(str) + "_" + df['at_bat_number'].astype(str)
+        # FIX: Baseball Savant labels the half-inning column 'inning_topbot' (e.g., 'Top'/'Bot')
+        df['derived_pa_id'] = df['game_pk'].astype(str) + "_" + df['inning_topbot'].fillna('Top').astype(str) + "_" + df['at_bat_number'].astype(str)
 
         pitches_inserted = 0
         pa_inserted = 0
@@ -68,7 +68,7 @@ def run(start_date=None, end_date=None):
                 pitch_data = {
                     "pitch_id": row.get("pitch_id"),
                     "game_pk": int(row.get("game_pk")) if row.get("game_pk") else None,
-                    "plate_appearance_id": row.get("derived_pa_id"),  # Linked directly here
+                    "plate_appearance_id": row.get("derived_pa_id"),  
                     "game_date": row.get("game_date") if row.get("game_date") else start_date,
                     "pitch_type": row.get("pitch_type"),
                     "at_bat_number": int(row.get("at_bat_number")) if row.get("at_bat_number") else 0,
@@ -87,7 +87,7 @@ def run(start_date=None, end_date=None):
                     "az": row.get("az"),
                     "effective_speed": row.get("effective_speed"),
                     "inning": int(row.get("inning")) if row.get("inning") else 1,
-                    "inning_half": row.get("inning_half") if row.get("inning_half") else "Top",
+                    "inning_half": row.get("inning_topbot") if row.get("inning_topbot") else "Top",
                     "outs_before_pitch": int(row.get("outs_when_up")) if row.get("outs_when_up") else 0,
                     "runner_on_first_id": int(row.get("on_1b")) if row.get("on_1b") else None,
                     "runner_on_second_id": int(row.get("on_2b")) if row.get("on_2b") else None,
@@ -138,13 +138,11 @@ def run(start_date=None, end_date=None):
 
         # --- LOOP 2: POPULATE UNIQUE MATCHUPS (plate_appearances) ---
         print("Extracting final matchup events to populate plate_appearances...")
-        # Sort by pitch_number ascending, then group by our derived PA key and take the last row
         pa_df = df.sort_values(by=['game_pk', 'at_bat_number', 'pitch_number'])
         pa_df = pa_df.groupby('derived_pa_id').last().reset_index()
 
         with engine.begin() as conn:
             for _, row in pa_df.iterrows():
-                # Safe checking for columns that might exist in your layout
                 pa_data = {
                     "plate_appearance_id": row.get("derived_pa_id"),
                     "game_pk": int(row.get("game_pk")) if row.get("game_pk") else None,
@@ -152,30 +150,36 @@ def run(start_date=None, end_date=None):
                     "pitcher_id": int(row.get("pitcher")) if row.get("pitcher") else None,
                     "at_bat_number": int(row.get("at_bat_number")) if row.get("at_bat_number") else 0,
                     "inning": int(row.get("inning")) if row.get("inning") else 1,
-                    "inning_half": row.get("inning_half") if row.get("inning_half") else "Top",
-                    "final_event": row.get("events"),                       # e.g., 'strikeout', 'walk', 'single'
+                    "inning_half": row.get("inning_topbot") if row.get("inning_topbot") else "Top",
+                    "final_event": row.get("events"),                       
                     "total_pitches_in_pa": int(row.get("pitch_number")) if row.get("pitch_number") else 1,
                     "final_balls": int(row.get("balls")) if row.get("balls") else 0,
                     "final_strikes": int(row.get("strikes")) if row.get("strikes") else 0
                 }
                 
-                # Dynamic DDL execution utilizing basic industry parameters
-                conn.execute(text("""
-                    INSERT INTO plate_appearances (
-                        plate_appearance_id, game_pk, batter_id, pitcher_id, at_bat_number, 
-                        inning, inning_half, final_event, total_pitches_in_pa, final_balls, final_strikes
-                    )
-                    VALUES (
-                        :plate_appearance_id, :game_pk, :batter_id, :pitcher_id, :at_bat_number, 
-                        :inning, :inning_half, :final_event, :total_pitches_in_pa, :final_balls, :final_strikes
-                    )
-                    ON CONFLICT (plate_appearance_id) DO UPDATE SET
-                        final_event = EXCLUDED.final_event,
-                        total_pitches_in_pa = EXCLUDED.total_pitches_in_pa,
-                        final_balls = EXCLUDED.final_balls,
-                        final_strikes = EXCLUDED.final_strikes;
-                """), pa_data)
-                pa_inserted += 1
+                # Check your actual column schema setup for plate_appearances table
+                # If your table contains extra strict NOT NULLs or alternative naming, modify fields here
+                try:
+                    conn.execute(text("""
+                        INSERT INTO plate_appearances (
+                            plate_appearance_id, game_pk, batter_id, pitcher_id, at_bat_number, 
+                            inning, inning_half, final_event, total_pitches_in_pa, final_balls, final_strikes
+                        )
+                        VALUES (
+                            :plate_appearance_id, :game_pk, :batter_id, :pitcher_id, :at_bat_number, 
+                            :inning, :inning_half, :final_event, :total_pitches_in_pa, :final_balls, :final_strikes
+                        )
+                        ON CONFLICT (plate_appearance_id) DO UPDATE SET
+                            final_event = EXCLUDED.final_event,
+                            total_pitches_in_pa = EXCLUDED.total_pitches_in_pa,
+                            final_balls = EXCLUDED.final_balls,
+                            final_strikes = EXCLUDED.final_strikes;
+                    """), pa_data)
+                    pa_inserted += 1
+                except Exception as pa_err:
+                    # Non-blocking skip if your table schema contains constraint variations
+                    print(f"PA Row skipped: {pa_err}")
+                    continue
 
         # --- LOOP 3: POPULATE CONTACT OUTCOMES (statcast_batted_balls) ---
         print("Filtering contact tracking elements for statcast_batted_balls...")
