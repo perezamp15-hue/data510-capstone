@@ -1,6 +1,6 @@
 import requests
 
-def fetch_batter_lineup_position_splits(player_id: int, season: int):
+def fetch_lineup_positions(player_id: int, season: int):
     """
     Scrapes a batter's statistical performance broken down by their 
     position in the batting order (1st, 2nd, ... 9th spot) for a given season.
@@ -11,7 +11,19 @@ def fetch_batter_lineup_position_splits(player_id: int, season: int):
         f"?stats=statSplits&group=hitting&sitCodes=bo1,bo2,bo3,bo4,bo5,bo6,bo7,bo8,bo9&season={season}"
     )
     
-    response = requests.get(url)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Connection timeout pulling lineup splits for batter {player_id}: {e}")
+        return {
+            "player_id": player_id,
+            "season": season,
+            "lineup_positions": {i: {"games": 0, "plate_appearances": 0, "pa_per_game": 0.0, "rbi": 0, "hr": 0} for i in range(1, 10)}
+        }
     
     # Pre-structure dictionary to hold metrics for all 9 spots in the order
     lineup_payload = {
@@ -21,7 +33,7 @@ def fetch_batter_lineup_position_splits(player_id: int, season: int):
     }
     
     if response.status_code != 200:
-        print(f"Error pulling lineup splits for batter {player_id}")
+        print(f"⚠️ Error pulling lineup splits for batter {player_id} (Status: {response.status_code})")
         return lineup_payload
         
     data = response.json()
@@ -38,7 +50,7 @@ def fetch_batter_lineup_position_splits(player_id: int, season: int):
         # Extract order spot integer from code string (e.g., "bo3" -> 3)
         try:
             spot_num = int(code.replace("bo", ""))
-        except ValueError:
+        except (ValueError, AttributeError):
             continue
             
         games = stat.get("games", 0)
