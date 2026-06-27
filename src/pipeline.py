@@ -94,14 +94,20 @@ def run_pipeline(season: int, target_date: datetime):
     finally:
         conn.close()
 
+#  Correct Way: Forcing the pipeline to look at "yesterday"
 if __name__ == "__main__":
-    # Allow for historical backtesting via command line arguments
-    target_year = int(sys.argv[1]) if len(sys.argv) > 1 else date.today().year
+    # Default to current season if not provided
+    target_year = int(sys.argv[1]) if len(sys.argv) > 1 else 2026
     
-    # Parse a specific date if provided, otherwise default to today
+    # If a specific date string is passed via CLI, use it; otherwise, default to yesterday
     if len(sys.argv) > 2:
-        run_date = datetime.strptime(sys.argv[2], "%Y-%m-%d")
+        from datetime import datetime
+        run_date = datetime.strptime(sys.argv[2], "%Y-%m-%d").date()
     else:
-        run_date = datetime.today()
+        # Subtracting 1 day handles the UTC rollover safely to target "yesterday"
+        # If your cron runs late at night and you want the day that just concluded, 
+        # you might even need timedelta(days=2) depending on the exact cron hour.
+        run_date = date.today() - timedelta(days=1)
 
+    print(f"--- Starting Pipeline for Season: {target_year} | Target Date: {run_date} ---")
     run_pipeline(season=target_year, target_date=run_date)
