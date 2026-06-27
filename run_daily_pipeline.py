@@ -1,17 +1,24 @@
 import sys
+import os
 from datetime import datetime, timedelta
 
-from scripts import scrape_statcast
-from scripts import scrape_game_feed
-from scripts import scrape_lineups
-from scripts import scrape_rosters
-from scripts import scrape_pitch_arsenal
-from scripts import scrape_defense
-from scripts import scrape_bullpen
-from scripts import scrape_weather
-from scripts import scrape_umpires
-from scripts import scrape_park_info
-from scripts import scrape_schedule
+# Force Python to treat the scripts directory as a core lookup folder
+scripts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'scripts')
+if scripts_dir not in sys.path:
+    sys.path.insert(0, scripts_dir)
+
+# Clear, direct imports with no prefixes or dots
+import scrape_statcast
+import scrape_game_feed
+import scrape_lineups
+import scrape_rosters
+import scrape_pitch_arsenal
+import scrape_defense
+import scrape_bullpen
+import scrape_weather
+import scrape_umpires
+import scrape_park_info
+import scrape_schedule
 
 def run_pipeline_for_date(target_date):
     print(f"\n=========================================")
