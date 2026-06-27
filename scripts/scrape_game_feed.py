@@ -27,7 +27,6 @@ def run(target_date):
         game_pk = g.get('gamePk')
         if not game_pk: continue
         
-        # API returns 'id' inside 'venue', we map it to 'park_id' for your database column
         api_venue_id = g.get('venue', {}).get('id')
         home_team_id = g.get('teams', {}).get('home', {}).get('team', {}).get('id')
         away_team_id = g.get('teams', {}).get('away', {}).get('team', {}).get('id')
@@ -39,25 +38,24 @@ def run(target_date):
         if abstract_state not in ['Final', 'Live', 'Preview'] and detailed_state != 'Final':
             continue
 
-        # FIX: The key here matches the database column name 'park_id'
+        # Cleaned structural dictionary containing only verified core keys
         game_data = {
             "game_pk": int(game_pk),
             "game_date": target_date,
             "park_id": int(api_venue_id) if api_venue_id else None, 
             "home_team_id": int(home_team_id) if home_team_id else None,
-            "away_team_id": int(away_team_id) if away_team_id else None,
-            "game_status": detailed_state or abstract_state
+            "away_team_id": int(away_team_id) if away_team_id else None
         }
 
         try:
             with engine.begin() as conn:
-                # FIX: Insert into 'park_id' instead of the non-existent 'venue_id'
+                # Omit game_status entirely to eliminate schema layout friction
                 conn.execute(text("""
-                    INSERT INTO games (game_pk, game_date, park_id, home_team_id, away_team_id, game_status)
-                    VALUES (:game_pk, :game_date, :park_id, :home_team_id, :away_team_id, :game_status)
+                    INSERT INTO games (game_pk, game_date, park_id, home_team_id, away_team_id)
+                    VALUES (:game_pk, :game_date, :park_id, :home_team_id, :away_team_id)
                     ON CONFLICT (game_pk) DO UPDATE SET
-                        game_status = EXCLUDED.game_status,
-                        park_id = EXCLUDED.park_id;
+                        park_id = EXCLUDED.park_id,
+                        game_date = EXCLUDED.game_date;
                 """), game_data)
             inserted_games += 1
         except Exception as db_err:
