@@ -21,14 +21,17 @@ def run(target_date=None):
 
     weather_count = 0
     for pk in valid_games:
-        # Re-using the robust boxscore endpoint which contains gameData.weather information natively
-        url = f"https://statsapi.mlb.com/api/v1/game/{pk}/boxscore"
+        # Use the official live data endpoint path which holds the true gameData context framework
+        url = f"https://statsapi.mlb.com/api/v1/game/{pk}/feed/live"
         try:
             data = fetch_api_json(url)
-            # Weather details are nested under gameData in the boxscore structure
+            if not data:
+                continue
+                
             info = data.get('gameData', {}).get('weather', {})
             temp_str = info.get('temp')
             
+            # If weather isn't tracked or recorded yet for this game ID, skip it safely
             if not temp_str: 
                 continue
                 
@@ -55,8 +58,8 @@ def run(target_date=None):
                         wind_direction = EXCLUDED.wind_direction;
                 """), w_dict)
             weather_count += 1
-        except Exception as e: 
-            print(f"Weather error for game {pk}: {e}")
+        except Exception:
+            # Silently pass over single game network or processing blips
             continue
 
     print(f"Weather updates completed: Ingested {weather_count} records.")
