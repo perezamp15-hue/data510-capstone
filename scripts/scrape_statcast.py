@@ -1,5 +1,6 @@
 import sys
 import io
+import math
 import requests
 import pandas as pd
 import numpy as np
@@ -67,12 +68,9 @@ def run(start_date=None, end_date=None):
 
         # --- STEP 1: POPULATE PARENTS FIRST (plate_appearances) ---
         print("Extracting final matchup events to populate plate_appearances...")
-        # Sort sequentially to ensure we extract initial states and final event counts accurately
         df_sorted = df.sort_values(by=['game_pk', 'at_bat_number', 'pitch_number'])
         
-        # Capture starting states from the first pitch of the plate appearance
         pa_start_df = df_sorted.groupby('derived_pa_id').first().reset_index()
-        # Capture ending states from the last pitch of the plate appearance
         pa_end_df = df_sorted.groupby('derived_pa_id').last().reset_index()
 
         pa_end_maps = {row['derived_pa_id']: row for _, row in pa_end_df.iterrows()}
@@ -82,11 +80,8 @@ def run(start_date=None, end_date=None):
                 pa_id = start_row.get("derived_pa_id")
                 end_row = pa_end_maps.get(pa_id, start_row)
 
-                # Safe fallbacks for base metrics to satisfy NOT NULL constraints
                 outs_at_start = int(start_row.get("outs_when_up")) if start_row.get("outs_when_up") is not None else 0
                 start_base_state = get_base_state_string(start_row.get("on_1b"), start_row.get("on_2b"), start_row.get("on_3b"))
-                
-                # Approximate end base state or fallback safely to a neutral state string
                 end_base_state = get_base_state_string(end_row.get("on_1b"), end_row.get("on_2b"), end_row.get("on_3b")) if end_row.get("events") is None else "000"
 
                 pa_data = {
@@ -97,7 +92,7 @@ def run(start_date=None, end_date=None):
                     "batter_id": int(end_row.get("batter")) if end_row.get("batter") else None,
                     "pitcher_id": int(end_row.get("pitcher")) if end_row.get("pitcher") else None,
                     "event_result": end_row.get("events"),                       
-                    "rbi_on_play": 0, # Placeholder or add computation if tracking runs
+                    "rbi_on_play": 0, 
                     "runs_scored_on_play": 0,
                     "total_balls": int(end_row.get("balls")) if end_row.get("balls") is not None else 0,
                     "total_strikes": int(end_row.get("strikes")) if end_row.get("strikes") is not None else 0,
@@ -210,29 +205,55 @@ def run(start_date=None, end_date=None):
 
         with engine.begin() as conn:
             for _, row in batted_df.iterrows():
+                ev = row.get("launch_speed")
+                la = row.get("launch_angle")
+                
+                # Dynamic calculations for immediate metric backfills
+                is_hard_hit = bool(ev >= 95.0) if ev is not None else None
+                is_sweet_spot = bool(8.0 <= la <= 32.0) if la is not None else None
+                
+                # Convert raw tracking coordinates to true spray angle degrees
+                hc_x = row.get("hc_x")
+                hc_y = row.get("hc_y")
+                calculated_spray = None
+                if hc_x is not None and hc_y is not None:
+                    calculated_spray = round(math.degrees(math.atan2(hc_x - 125, 201 - hc_y)), 2)
+
                 batted_data = {
                     "pitch_id": row.get("pitch_id"),
-                    "exit_velocity": row.get("launch_speed"),       
-                    "launch_angle": row.get("launch_angle"),
+                    "exit_velocity": ev,       
+                    "launch_angle": la,
                     "hit_distance_feet": int(row.get("hit_distance_sc")) if row.get("hit_distance_sc") else None,
-                    "spray_angle": row.get("hc_x"),                  
-                    "hit_location_x": row.get("hc_y"),
-                    "hit_location_y": row.get("hc_x") # Mapping fallback coordinate
+                    "spray_angle": calculated_spray if calculated_spray is not None else hc_x,                  
+                    "hit_location_x": hc_x, 
+                    "hit_location_y": hc_y, 
+                    "expected_woba": row.get("estimated_woba_using_speedangle"), 
+                    "expected_slugging": row.get("estimated_slg_using_speedangle"),
+                    "is_hard_hit": is_hard_hit,
+                    "is_sweet_spot": is_sweet_spot
                 }
                 
                 try:
                     conn.execute(text("""
                         INSERT INTO statcast_batted_balls (
-                            pitch_id, exit_velocity, launch_angle, hit_distance_feet, spray_angle, hit_location_x, hit_location_y
+                            pitch_id, exit_velocity, launch_angle, hit_distance_feet, spray_angle, 
+                            hit_location_x, hit_location_y, expected_woba, expected_slugging, is_hard_hit, is_sweet_spot
                         )
-                        VALUES (:pitch_id, :exit_velocity, :launch_angle, :hit_distance_feet, :spray_angle, :hit_location_x, :hit_location_y)
+                        VALUES (
+                            :pitch_id, :exit_velocity, :launch_angle, :hit_distance_feet, :spray_angle, 
+                            :hit_location_x, :hit_location_y, :expected_woba, :expected_slugging, :is_hard_hit, :is_sweet_spot
+                        )
                         ON CONFLICT (pitch_id) DO UPDATE SET
                             exit_velocity = EXCLUDED.exit_velocity,
                             launch_angle = EXCLUDED.launch_angle,
                             hit_distance_feet = EXCLUDED.hit_distance_feet,
                             spray_angle = EXCLUDED.spray_angle,
                             hit_location_x = EXCLUDED.hit_location_x,
-                            hit_location_y = EXCLUDED.hit_location_y;
+                            hit_location_y = EXCLUDED.hit_location_y,
+                            expected_woba = EXCLUDED.expected_woba,
+                            expected_slugging = EXCLUDED.expected_slugging,
+                            is_hard_hit = EXCLUDED.is_hard_hit,
+                            is_sweet_spot = EXCLUDED.is_sweet_spot;
                     """), batted_data)
                     batted_balls_inserted += 1
                 except Exception:
