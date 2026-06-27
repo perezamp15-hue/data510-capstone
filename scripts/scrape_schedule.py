@@ -1,5 +1,5 @@
 import pandas as pd
-from db_client import get_engine, fetch_api_json
+from scripts.db_client import get_engine, fetch_api_json
 
 def run(season=2026):
     print(f"Importing core framework schedule for {season} season...")
