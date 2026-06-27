@@ -14,18 +14,19 @@ def fetch_catcher_framing_metrics(season: int = 2026):
     pop_url = f"https://baseballsavant.mlb.com/leaderboard/poptime?year={season}&team=&min_throws=0&csv=true"
     
     catcher_map = {}
-
+    
+    # Create the Cloudflare-bypassing scraper
     scraper = cloudscraper.create_scraper()
     
     # Process Framing & Strike %
-    res_frame = requests.get(framing_url, headers=headers)
+    res_frame = scraper.get(framing_url)
     if res_frame.status_code == 200:
         try:
             df_frame = pd.read_csv(StringIO(res_frame.text))
             for _, row in df_frame.iterrows():
                 raw_pid = row.get('player_id')
                 
-                # FIX 2: Check for None or NaN before casting to integer
+                # SAFEGUARD: Check for None or NaN before casting to integer
                 if pd.isna(raw_pid):
                     continue
                     
@@ -39,12 +40,12 @@ def fetch_catcher_framing_metrics(season: int = 2026):
                     "caught_stealing_pct": 0.0 
                 }
         except pd.errors.ParserError:
-            print("Failed to parse Catcher Framing CSV. Baseball Savant may have blocked the request.")
+            print("⚠️ Failed to parse Catcher Framing CSV. Baseball Savant may have blocked the request.")
         except Exception as e:
             print(f"Error parsing framing data: {e}")
             
     # Process Pop Time & Caught Stealing %
-    res_pop = requests.get(pop_url, headers=headers)
+    res_pop = scraper.get(pop_url)
     if res_pop.status_code == 200:
         try:
             df_pop = pd.read_csv(StringIO(res_pop.text))
@@ -67,7 +68,7 @@ def fetch_catcher_framing_metrics(season: int = 2026):
                         (cs / total_attempts) * 100 if total_attempts > 0 else 0.0
                     )
         except pd.errors.ParserError:
-            print("Failed to parse Pop Time CSV. Baseball Savant may have blocked the request.")
+            print("⚠️ Failed to parse Pop Time CSV. Baseball Savant may have blocked the request.")
         except Exception as e:
             print(f"Error parsing pop time CSV: {e}")
             
