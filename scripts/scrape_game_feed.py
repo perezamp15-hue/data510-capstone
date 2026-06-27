@@ -7,11 +7,10 @@ def run(target_date):
     print(f"Ingesting main boxscore feed matrices for: {target_date}")
     engine = get_engine()
     
-    # Extract the 4-digit year dynamically from the target date string
     try:
         season_year = int(str(target_date).split("-")[0])
     except Exception:
-        season_year = 2026 # Stable fallback for your current system window
+        season_year = 2026
 
     url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={target_date}"
     try:
@@ -33,6 +32,9 @@ def run(target_date):
         game_pk = g.get('gamePk')
         if not game_pk: continue
         
+        # EXTRACT GAME TYPE: Pulls regular season status ("R") to satisfy the NOT NULL column
+        game_type = g.get('gameType', 'R') 
+        
         api_venue_id = g.get('venue', {}).get('id')
         home_team_id = g.get('teams', {}).get('home', {}).get('team', {}).get('id')
         away_team_id = g.get('teams', {}).get('away', {}).get('team', {}).get('id')
@@ -44,11 +46,11 @@ def run(target_date):
         if abstract_state not in ['Final', 'Live', 'Preview'] and detailed_state != 'Final':
             continue
 
-        # Map all structural keys including the required season integer
         game_data = {
             "game_pk": int(game_pk),
             "game_date": target_date,
-            "season": season_year, # Satisfies the NOT NULL constraint
+            "season": season_year,
+            "game_type": game_type, # Fixed parameter mapping
             "park_id": int(api_venue_id) if api_venue_id else None, 
             "home_team_id": int(home_team_id) if home_team_id else None,
             "away_team_id": int(away_team_id) if away_team_id else None
@@ -56,14 +58,15 @@ def run(target_date):
 
         try:
             with engine.begin() as conn:
-                # Include season in the statement execution
+                # Add game_type into the execution string layout
                 conn.execute(text("""
-                    INSERT INTO games (game_pk, game_date, season, park_id, home_team_id, away_team_id)
-                    VALUES (:game_pk, :game_date, :season, :park_id, :home_team_id, :away_team_id)
+                    INSERT INTO games (game_pk, game_date, season, game_type, park_id, home_team_id, away_team_id)
+                    VALUES (:game_pk, :game_date, :season, :game_type, :park_id, :home_team_id, :away_team_id)
                     ON CONFLICT (game_pk) DO UPDATE SET
                         park_id = EXCLUDED.park_id,
                         game_date = EXCLUDED.game_date,
-                        season = EXCLUDED.season;
+                        season = EXCLUDED.season,
+                        game_type = EXCLUDED.game_type;
                 """), game_data)
             inserted_games += 1
         except Exception as db_err:
