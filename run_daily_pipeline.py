@@ -76,12 +76,12 @@ if __name__ == '__main__':
         mlb_tz = pytz.timezone('US/Eastern')
         current_time_mlb = datetime.now(mlb_tz)
         
-        # Calculate exactly 1 calendar day backward from US/Eastern perspective
-        yesterday_mlb = current_time_mlb - timedelta(days=1)
-        yesterday_str = yesterday_mlb.strftime('%Y-%m-%d')
+        # Safe 4 AM PT run means yesterday's calendar date is now 100% settled
+        safe_date_mlb = current_time_mlb - timedelta(days=1)
+        target_str = safe_date_mlb.strftime('%Y-%m-%d')
         
-        print(f"Server (UTC): {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"MLB local time context: {current_time_mlb.strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"Targeting finalized dates for: {yesterday_str}")
+        print(f"Server Time (UTC): {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"MLB Eastern Time Context: {current_time_mlb.strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"Targeting fully archived data for: {target_str}")
         
-        run_pipeline_for_date(yesterday_str)
+        run_pipeline_for_date(target_str)
