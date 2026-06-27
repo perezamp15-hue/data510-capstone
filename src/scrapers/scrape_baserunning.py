@@ -2,7 +2,7 @@ import requests
 
 def fetch_baserunning_stats(player_id: int, season: int):
     """
-    Scrapes baseline and advanced base running metrics for a player,
+    Scrapes baseline and advanced base running metrics for a player, 
     including tracking properties like sprint speed and extra bases taken.
     """
     # 1. Standard Hitting endpoint for Stolen Bases
