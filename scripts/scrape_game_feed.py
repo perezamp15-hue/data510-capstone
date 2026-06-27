@@ -12,7 +12,6 @@ def run(target_date):
     except Exception:
         season_year = 2026
 
-    # Hydrate linescore, boxscore, and decisions to grab pitcher profiles
     url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={target_date}&hydrate=linescore,boxscore,decisions"
     try:
         schedule_data = fetch_api_json(url)
@@ -40,7 +39,7 @@ def run(target_date):
         if abstract_state not in ['Final', 'Live', 'Preview'] and detailed_state != 'Final':
             continue
 
-        # 1. Base structural keys
+        # Core keys
         game_type = g.get('gameType', 'R') 
         api_venue_id = g.get('venue', {}).get('id')
         
@@ -50,17 +49,17 @@ def run(target_date):
         home_team_id = home_node.get('team', {}).get('id')
         away_team_id = away_node.get('team', {}).get('id')
 
-        # 2. Extract Pitcher Decisions safely
+        # Pitcher Decisions
         decisions = g.get('decisions', {})
         winner_id = decisions.get('winner', {}).get('id')
         loser_id = decisions.get('loser', {}).get('id')
         save_id = decisions.get('save', {}).get('id')
 
-        # 3. Game Time Metrics
+        # Timestamps and Meta
         day_night_type = g.get('dayNight')
-        game_time_utc = g.get('gameDate') # Raw start timestamp from API
+        raw_start_time = g.get('gameDate') # Raw start timestamp string from API
 
-        # 4. Boxscore metadata array processing
+        # Parse Info array (Attendance and Duration)
         game_info = g.get('boxscore', {}).get('info', [])
         attendance = None
         duration_mins = None
@@ -70,7 +69,6 @@ def run(target_date):
             value = info.get('value', '')
             if 'Attendance' in label or 'Att' in label:
                 try: 
-                    # Clean out non-numeric characters like commas
                     clean_val = ''.join(c for c in value if c.isdigit())
                     attendance = int(clean_val)
                 except: pass
@@ -80,17 +78,23 @@ def run(target_date):
                     duration_mins = int(parts[0]) * 60 + int(parts[1])
                 except: pass
 
-        # 5. Linescore Scores
+        # Fallback duration check if 'T' was structured weirdly
+        if not duration_mins and g.get('gameTimeMinutes'):
+            try: duration_mins = int(g.get('gameTimeMinutes'))
+            except: pass
+
+        # Scores
         linescore = g.get('linescore', {})
         home_score = linescore.get('teams', {}).get('home', {}).get('runs')
         away_score = linescore.get('teams', {}).get('away', {}).get('runs')
 
-        # Map all extracted metrics to your schema columns
+        # Unified Payload
         game_data = {
             "game_pk": int(game_pk),
             "game_date": target_date,
             "season": season_year,
             "game_type": game_type,
+            "game_start_time": raw_start_time, # Fallback assignment for game start time
             "park_id": int(api_venue_id) if api_venue_id else None, 
             "home_team_id": int(home_team_id) if home_team_id else None,
             "away_team_id": int(away_team_id) if away_team_id else None,
@@ -106,16 +110,15 @@ def run(target_date):
 
         try:
             with engine.begin() as conn:
-                # Upsert query containing all targeted fields
                 conn.execute(text("""
                     INSERT INTO games (
-                        game_pk, game_date, season, game_type, park_id, 
+                        game_pk, game_date, season, game_type, game_start_time, park_id, 
                         home_team_id, away_team_id, day_night_type, 
                         attendance, game_duration_minutes, home_score, away_score,
                         winning_pitcher_id, losing_pitcher_id, save_pitcher_id
                     )
                     VALUES (
-                        :game_pk, :game_date, :season, :game_type, :park_id, 
+                        :game_pk, :game_date, :season, :game_type, :game_start_time, :park_id, 
                         :home_team_id, :away_team_id, :day_night_type, 
                         :attendance, :game_duration_minutes, :home_score, :away_score,
                         :winning_pitcher_id, :losing_pitcher_id, :save_pitcher_id
@@ -125,6 +128,7 @@ def run(target_date):
                         game_date = EXCLUDED.game_date,
                         season = EXCLUDED.season,
                         game_type = EXCLUDED.game_type,
+                        game_start_time = EXCLUDED.game_start_time,
                         day_night_type = EXCLUDED.day_night_type,
                         attendance = EXCLUDED.attendance,
                         game_duration_minutes = EXCLUDED.game_duration_minutes,
@@ -138,7 +142,7 @@ def run(target_date):
         except Exception as db_err:
             print(f"Database write failure for Game {game_pk}: {db_err}")
 
-    print(f"Game Feed Complete: Successfully committed {inserted_games} games with absolute boxscore profiles.")
+    print(f"Game Feed Complete: Successfully updated {inserted_games} games with start times.")
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
