@@ -43,6 +43,26 @@ def run(target_date):
         game_type = g.get('gameType', 'R') 
         api_venue_id = g.get('venue', {}).get('id')
         
+        # --- PARK ID TRANSLATION LAYER ---
+        local_park_id = None
+        if api_venue_id:
+            try:
+                with engine.connect() as conn:
+                    # Adjust 'mlb_venue_id' if your parks table uses a different column name
+                    park_lookup = conn.execute(text("""
+                        SELECT id FROM parks WHERE mlb_venue_id = :api_id LIMIT 1
+                    """), {"api_id": int(api_venue_id)}).fetchone()
+                    
+                    if park_lookup:
+                        local_park_id = park_lookup[0] # Found your internal DB primary key!
+                    else:
+                        # Fallback: if not found in your master table, use the API ID for now
+                        local_park_id = int(api_venue_id)
+            except Exception as lookup_err:
+                print(f"Park translation warning for Venue {api_venue_id}: {lookup_err}")
+                local_park_id = int(api_venue_id)
+        # ---------------------------------
+
         home_node = g.get('teams', {}).get('home', {})
         away_node = g.get('teams', {}).get('away', {})
         
@@ -56,8 +76,6 @@ def run(target_date):
         save_id = decisions.get('save', {}).get('id')
 
         day_night_type = g.get('dayNight')
-
-        # Pass the full timestamp string directly to the TIMESTAMPTZ field
         raw_game_date = g.get('gameDate') 
 
         # Parse Info array (Attendance and Duration)
@@ -94,8 +112,8 @@ def run(target_date):
             "game_date": target_date,
             "season": season_year,
             "game_type": game_type,
-            "scheduled_start": raw_game_date, # Raw string matches TIMESTAMPTZ requirements
-            "park_id": int(api_venue_id) if api_venue_id else None, 
+            "scheduled_start": raw_game_date, 
+            "park_id": local_park_id, # Safely uses your translated DB ID number
             "home_team_id": int(home_team_id) if home_team_id else None,
             "away_team_id": int(away_team_id) if away_team_id else None,
             "day_night_type": day_night_type,
@@ -142,7 +160,7 @@ def run(target_date):
         except Exception as db_err:
             print(f"Database write failure for Game {game_pk}: {db_err}")
 
-    print(f"Game Feed Complete: Successfully saved {inserted_games} games with proper timestamp formatting.")
+    print(f"Game Feed Complete: Successfully saved {inserted_games} games with relational park translations.")
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
