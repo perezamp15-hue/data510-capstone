@@ -9,13 +9,13 @@ def save_lineups_to_db(lineups_df):
     engine = get_engine()
     
     try:
-        # Quick path attempt
+        # Standard append attempt
         lineups_df.to_sql("starting_lineups", con=engine, if_exists="append", index=False)
         print("Lineup batch updated successfully.")
     except IntegrityError:
         print("Foreign key mismatch detected. Filtering out missing parent game records...")
         
-        # Pull only valid game primary keys currently tracked in your base tables
+        # Pull valid game primary keys currently tracked in your base tables
         valid_games = pd.read_sql("SELECT game_pk FROM games", con=engine)['game_pk'].tolist()
         
         # Filter dataframe dynamically
