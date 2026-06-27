@@ -15,6 +15,7 @@ def fetch_statcast_park_factors(season: int = 2026):
     }
     
     park_factors = {}
+    scraper = cloudscraper.create_scraper()
     response = requests.get(url, headers=headers)
     
     if response.status_code != 200:
