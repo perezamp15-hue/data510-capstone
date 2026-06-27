@@ -1,56 +1,38 @@
+import sys
 import pandas as pd
-from sqlalchemy.exc import IntegrityError
+from datetime import datetime, timedelta
+import pytz
 from db_client import get_engine, fetch_api_json
+from sqlalchemy import text
 
-def get_bullpen_data(game_pk):
-    url = f"https://statsapi.mlb.com/api/v1/game/{game_pk}/feed/live"
-    try:
-        data = fetch_api_json(url)
-        records = []
-        live_data = data.get('liveData', {})
-        boxscore = live_data.get('boxscore', {})
-        teams = boxscore.get('teams', {})
-        
-        for team_type in ['home', 'away']:
-            team_stats = teams.get(team_type, {})
-            pitchers = team_stats.get('pitchers', [])
-            # Custom parsing criteria logic goes here...
-            
-        return records
-    except Exception as e:
-        print(f"Skipping bullpen check for {game_pk}: {e}")
-        return []
-
-def run(target_date):
-    print(f"Extracting bullpen appearances for games on {target_date}...")
+def run(target_date=None):
+    if not target_date:
+        local_tz = pytz.timezone('America/Los_Angeles')
+        target_date = (datetime.now(local_tz) - timedelta(days=1)).strftime('%Y-%m-%d')
     engine = get_engine()
-    
-    # Absolute protection query: grab existing game keys safely
-    try:
-        valid_games = pd.read_sql("SELECT game_pk FROM games", con=engine)['game_pk'].tolist()
-    except Exception as e:
-        print(f"Failed to read keys from database: {e}")
-        return
-
-    all_bullpen_records = []
-    # Feed data loops
+    try: valid_games = pd.read_sql("SELECT game_pk FROM games WHERE game_date = %s", con=engine, params=(target_date,))['game_pk'].tolist()
+    except Exception: return
+    valid_players = pd.read_sql("SELECT player_id FROM players", con=engine)['player_id'].tolist()
     for pk in valid_games:
-        records = get_bullpen_data(pk)
-        if records:
-            all_bullpen_records.extend(records)
-            
-    if not all_bullpen_records:
-        print(f"No bullpen statistics extracted for {target_date}.")
-        return
+        url = f"https://statsapi.mlb.com/api/v1/game/{pk}/boxscore"
+        try:
+            box_data = fetch_api_json(url)
+            for side in ['home', 'away']:
+                pitchers = box_data.get('teams', {}).get(side, {}).get('pitchers', [])
+                if len(pitchers) <= 1: continue
+                for p_id in pitchers[1:]:
+                    if int(p_id) not in valid_players: continue
+                    p_stats = box_data.get('teams', {}).get(side, {}).get('players', {}).get(f"ID{p_id}", {}).get('stats', {}).get('pitching', {})
+                    ip_str, pitches, bf = p_stats.get('inningsPitched', '0.0'), p_stats.get('pitchesThrown', 0), p_stats.get('battersFaced', 0)
+                    if pitches == 0: continue
+                    bp_dict = {"game_pk": pk, "pitcher_id": int(p_id), "innings_pitched": float(ip_str), "pitches_thrown": int(pitches), "batters_faced": int(bf)}
+                    with engine.begin() as conn:
+                        conn.execute(text("""
+                            INSERT INTO bullpen_appearances (game_pk, pitcher_id, innings_pitched, pitches_thrown, batters_faced)
+                            VALUES (:game_pk, :pitcher_id, :innings_pitched, :pitches_thrown, :batters_faced)
+                            ON CONFLICT (game_pk, pitcher_id) DO UPDATE SET innings_pitched = EXCLUDED.innings_pitched, pitches_thrown = EXCLUDED.pitches_thrown, batters_faced = EXCLUDED.batters_faced;
+                        """), bp_dict)
+        except Exception: continue
 
-    bullpen_df = pd.DataFrame(all_bullpen_records)
-    
-    try:
-        bullpen_df.to_sql("bullpen_appearances", con=engine, if_exists="append", index=False)
-        print(f"Successfully processed {len(bullpen_df)} bullpen entries.")
-    except IntegrityError:
-        # Fallback filter mapping verification
-        safe_df = bullpen_df[bullpen_df['game_pk'].isin(valid_games)]
-        if not safe_df.empty:
-            safe_df.to_sql("bullpen_appearances", con=engine, if_exists="append", index=False)
-            print(f"Successfully synchronized {len(safe_df)} safe bullpen entries.")
+if __name__ == "__main__":
+    run(sys.argv[1] if len(sys.argv) > 1 else None)
