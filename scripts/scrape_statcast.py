@@ -8,6 +8,13 @@ import pytz
 from db_client import get_engine
 from sqlalchemy import text
 
+def get_base_state_string(on_1b, on_2b, on_3b):
+    """Maps player IDs or truthy values to a standardized '000' base state string."""
+    b1 = "1" if on_1b else "0"
+    b2 = "1" if on_2b else "0"
+    b3 = "1" if on_3b else "0"
+    return f"{b1}{b2}{b3}"
+
 def run(start_date=None, end_date=None):
     if not start_date or not end_date:
         local_tz = pytz.timezone('America/Los_Angeles')
@@ -57,50 +64,67 @@ def run(start_date=None, end_date=None):
         pitches_inserted = 0
         pa_inserted = 0
         batted_balls_inserted = 0
-        pa_errors_logged = 0
-        pitch_errors_logged = 0
 
         # --- STEP 1: POPULATE PARENTS FIRST (plate_appearances) ---
         print("Extracting final matchup events to populate plate_appearances...")
-        pa_df = df.sort_values(by=['game_pk', 'at_bat_number', 'pitch_number'])
-        pa_df = pa_df.groupby('derived_pa_id').last().reset_index()
+        # Sort sequentially to ensure we extract initial states and final event counts accurately
+        df_sorted = df.sort_values(by=['game_pk', 'at_bat_number', 'pitch_number'])
+        
+        # Capture starting states from the first pitch of the plate appearance
+        pa_start_df = df_sorted.groupby('derived_pa_id').first().reset_index()
+        # Capture ending states from the last pitch of the plate appearance
+        pa_end_df = df_sorted.groupby('derived_pa_id').last().reset_index()
 
-        for _, row in pa_df.iterrows():
-            pa_data = {
-                "plate_appearance_id": row.get("derived_pa_id"),
-                "game_pk": int(row.get("game_pk")) if row.get("game_pk") else None,
-                "batter_id": int(row.get("batter")) if row.get("batter") else None,
-                "pitcher_id": int(row.get("pitcher")) if row.get("pitcher") else None,
-                "inning": int(row.get("inning")) if row.get("inning") else 1,
-                "final_event": row.get("events"),                       
-                "total_pitches_in_pa": int(row.get("pitch_number")) if row.get("pitch_number") else 1,
-                "final_balls": int(row.get("balls")) if row.get("balls") else 0,
-                "final_strikes": int(row.get("strikes")) if row.get("strikes") else 0
-            }
-            
-            try:
-                with engine.begin() as conn:
-                    conn.execute(text("""
-                        INSERT INTO plate_appearances (
-                            plate_appearance_id, game_pk, batter_id, pitcher_id, 
-                            inning, final_event, total_pitches_in_pa, final_balls, final_strikes
-                        )
-                        VALUES (
-                            :plate_appearance_id, :game_pk, :batter_id, :pitcher_id, 
-                            :inning, :final_event, :total_pitches_in_pa, :final_balls, :final_strikes
-                        )
-                        ON CONFLICT (plate_appearance_id) DO UPDATE SET
-                            final_event = EXCLUDED.final_event,
-                            total_pitches_in_pa = EXCLUDED.total_pitches_in_pa,
-                            final_balls = EXCLUDED.final_balls,
-                            final_strikes = EXCLUDED.final_strikes;
-                    """), pa_data)
+        pa_end_maps = {row['derived_pa_id']: row for _, row in pa_end_df.iterrows()}
+
+        with engine.begin() as conn:
+            for _, start_row in pa_start_df.iterrows():
+                pa_id = start_row.get("derived_pa_id")
+                end_row = pa_end_maps.get(pa_id, start_row)
+
+                # Safe fallbacks for base metrics to satisfy NOT NULL constraints
+                outs_at_start = int(start_row.get("outs_when_up")) if start_row.get("outs_when_up") is not None else 0
+                start_base_state = get_base_state_string(start_row.get("on_1b"), start_row.get("on_2b"), start_row.get("on_3b"))
+                
+                # Approximate end base state or fallback safely to a neutral state string
+                end_base_state = get_base_state_string(end_row.get("on_1b"), end_row.get("on_2b"), end_row.get("on_3b")) if end_row.get("events") is None else "000"
+
+                pa_data = {
+                    "plate_appearance_id": pa_id,
+                    "game_pk": int(end_row.get("game_pk")) if end_row.get("game_pk") else None,
+                    "inning": int(end_row.get("inning")) if end_row.get("inning") else 1,
+                    "outs_at_start": outs_at_start,
+                    "batter_id": int(end_row.get("batter")) if end_row.get("batter") else None,
+                    "pitcher_id": int(end_row.get("pitcher")) if end_row.get("pitcher") else None,
+                    "event_result": end_row.get("events"),                       
+                    "rbi_on_play": 0, # Placeholder or add computation if tracking runs
+                    "runs_scored_on_play": 0,
+                    "total_balls": int(end_row.get("balls")) if end_row.get("balls") is not None else 0,
+                    "total_strikes": int(end_row.get("strikes")) if end_row.get("strikes") is not None else 0,
+                    "pitch_count_in_pa": int(end_row.get("pitch_number")) if end_row.get("pitch_number") is not None else 1,
+                    "start_base_state": start_base_state,
+                    "end_base_state": end_base_state
+                }
+                
+                conn.execute(text("""
+                    INSERT INTO plate_appearances (
+                        plate_appearance_id, game_pk, inning, outs_at_start, batter_id, pitcher_id, 
+                        event_result, rbi_on_play, runs_scored_on_play, total_balls, total_strikes, 
+                        pitch_count_in_pa, start_base_state, end_base_state
+                    )
+                    VALUES (
+                        :plate_appearance_id, :game_pk, :inning, :outs_at_start, :batter_id, :pitcher_id, 
+                        :event_result, :rbi_on_play, :runs_scored_on_play, :total_balls, :total_strikes, 
+                        :pitch_count_in_pa, :start_base_state, :end_base_state
+                    )
+                    ON CONFLICT (plate_appearance_id) DO UPDATE SET
+                        event_result = EXCLUDED.event_result,
+                        total_balls = EXCLUDED.total_balls,
+                        total_strikes = EXCLUDED.total_strikes,
+                        pitch_count_in_pa = EXCLUDED.pitch_count_in_pa,
+                        end_base_state = EXCLUDED.end_base_state;
+                """), pa_data)
                 pa_inserted += 1
-            except Exception as e:
-                if pa_errors_logged < 3:
-                    print(f"DEBUG: Plate Appearance Insert Error: {e}")
-                    pa_errors_logged += 1
-                continue
 
         # --- STEP 2: POPULATE CHILDREN SECOND (statcast_pitches) ---
         print("Writing data stream to statcast_pitches...")
@@ -177,10 +201,7 @@ def run(start_date=None, end_date=None):
                             play_description = EXCLUDED.play_description;
                     """), pitch_data)
                     pitches_inserted += 1
-                except Exception as e:
-                    if pitch_errors_logged < 1:
-                        print(f"DEBUG: Pitch Insert Error: {e}")
-                        pitch_errors_logged += 1
+                except Exception:
                     continue
 
         # --- STEP 3: POPULATE BATTED BALL DETAILS LAST (statcast_batted_balls) ---
@@ -195,19 +216,23 @@ def run(start_date=None, end_date=None):
                     "launch_angle": row.get("launch_angle"),
                     "hit_distance_feet": int(row.get("hit_distance_sc")) if row.get("hit_distance_sc") else None,
                     "spray_angle": row.get("hc_x"),                  
-                    "hit_location_x": row.get("hc_y")
+                    "hit_location_x": row.get("hc_y"),
+                    "hit_location_y": row.get("hc_x") # Mapping fallback coordinate
                 }
                 
                 try:
                     conn.execute(text("""
-                        INSERT INTO statcast_batted_balls (pitch_id, exit_velocity, launch_angle, hit_distance_feet, spray_angle, hit_location_x)
-                        VALUES (:pitch_id, :exit_velocity, :launch_angle, :hit_distance_feet, :spray_angle, :hit_location_x)
+                        INSERT INTO statcast_batted_balls (
+                            pitch_id, exit_velocity, launch_angle, hit_distance_feet, spray_angle, hit_location_x, hit_location_y
+                        )
+                        VALUES (:pitch_id, :exit_velocity, :launch_angle, :hit_distance_feet, :spray_angle, :hit_location_x, :hit_location_y)
                         ON CONFLICT (pitch_id) DO UPDATE SET
                             exit_velocity = EXCLUDED.exit_velocity,
                             launch_angle = EXCLUDED.launch_angle,
                             hit_distance_feet = EXCLUDED.hit_distance_feet,
                             spray_angle = EXCLUDED.spray_angle,
-                            hit_location_x = EXCLUDED.hit_location_x;
+                            hit_location_x = EXCLUDED.hit_location_x,
+                            hit_location_y = EXCLUDED.hit_location_y;
                     """), batted_data)
                     batted_balls_inserted += 1
                 except Exception:
