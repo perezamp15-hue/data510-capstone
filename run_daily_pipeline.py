@@ -1,12 +1,12 @@
 import sys
 import os
-from datetime import datetime, timedelta
-import pytz
 
+# 1. MOVED TO THE ABSOLUTE TOP: Inject scripts directory into Python's path list
 scripts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'scripts')
 if scripts_dir not in sys.path:
     sys.path.insert(0, scripts_dir)
 
+# 2. Now Python can safely look inside /app/scripts/ to resolve these modules
 import scrape_teams
 import scrape_park_info
 import scrape_rosters
@@ -20,6 +20,9 @@ import scrape_weather
 import scrape_umpires
 import scrape_pitch_arsenal
 import scrape_transactions
+
+from datetime import datetime, timedelta
+import pytz
 
 def run_pipeline_for_date(target_date=None):
     if not target_date:
@@ -39,13 +42,15 @@ def run_pipeline_for_date(target_date=None):
     try: scrape_rosters.run(season=2026)
     except Exception as e: print(f"Roster sync failed: {e}")
 
-    try: scrape_schedule.run(season=2026)
-    except Exception as e: print(f"Schedule sync failed: {e}")
-        
+    # --- SWAPPED: game_feed runs BEFORE schedule to ensure valid game_pks exist ---
     try: scrape_game_feed.run(target_date)
     except Exception as e:
         print(f"CRITICAL: Main Feed failed for {target_date}: {e}")
         return
+
+    try: scrape_schedule.run(season=2026)
+    except Exception as e: print(f"Schedule sync failed: {e}")
+    # ------------------------------------------------------------------------------
 
     try: scrape_statcast.run(target_date, target_date)
     except Exception as e: print(f"Statcast failed: {e}")
