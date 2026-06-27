@@ -1,16 +1,10 @@
-import os
 import requests
-import pandas as pd
 from sqlalchemy import create_engine
+# Import the config instance from your root directory
+from config import config
 
-# Pull connection string directly from Railway Environment
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://user:pass@localhost:5432/gmsim")
-
-# Fix protocol prefix for SQLAlchemy if needed
-if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
-
-engine = create_engine(DATABASE_URL)
+# Create the engine dynamically using the configuration mapping
+engine = create_engine(config.DATABASE_URL)
 
 def get_engine():
     return engine
