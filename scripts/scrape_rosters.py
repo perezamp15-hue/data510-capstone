@@ -1,6 +1,6 @@
 import sys
 import pandas as pd
-from db_client import get_engine, fetch_api_json
+from scripts.db_client import get_engine, fetch_api_json
 
 def run(season=2026):
     url = f"https://statsapi.mlb.com/api/v1/sports/1/players?season={season}"
