@@ -1,7 +1,31 @@
-import sys
-from datetime import datetime, timedelta
 import pandas as pd
-from scripts.db_client import get_engine, fetch_api_json
+from sqlalchemy.exc import IntegrityError
+from db_client import get_engine
+
+def save_lineups_to_db(lineups_df):
+    if lineups_df is None or lineups_df.empty:
+        return
+        
+    engine = get_engine()
+    
+    try:
+        # Quick path attempt
+        lineups_df.to_sql("starting_lineups", con=engine, if_exists="append", index=False)
+        print("Lineup batch updated successfully.")
+    except IntegrityError:
+        print("Foreign key mismatch detected. Filtering out missing parent game records...")
+        
+        # Pull only valid game primary keys currently tracked in your base tables
+        valid_games = pd.read_sql("SELECT game_pk FROM games", con=engine)['game_pk'].tolist()
+        
+        # Filter dataframe dynamically
+        safe_df = lineups_df[lineups_df['game_pk'].isin(valid_games)]
+        
+        if not safe_df.empty:
+            safe_df.to_sql("starting_lineups", con=engine, if_exists="append", index=False)
+            print(f"Successfully tracked {len(safe_df)} clean situational entries.")
+        else:
+            print("Skipping insert: No parent match inside the 'games' table exists yet.")
 
 def run(date_str=None):
     if not date_str:
