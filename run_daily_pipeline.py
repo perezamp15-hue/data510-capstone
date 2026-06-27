@@ -1,27 +1,21 @@
 import sys
 import os
 
-# 1. Calculate relative path based on file location
 base_dir = os.path.dirname(os.path.abspath(__file__))
 scripts_dir = os.path.join(base_dir, 'scripts')
-
-# 2. Hardcoded fallback for standard Docker configurations
 docker_scripts_dir = "/app/scripts"
 
-# Inject paths into Python lookup matrix
 for path in [scripts_dir, docker_scripts_dir, base_dir]:
     if os.path.exists(path) and path not in sys.path:
         sys.path.insert(0, path)
 
-# 3. DIAGNOSTIC LOGGING: If it still fails, this will show you why
 print("--- Docker Container Path Debugger ---")
 print(f"Current Working Directory: {os.getcwd()}")
 print(f"Calculated Scripts Dir:    {scripts_dir} (Exists: {os.path.exists(scripts_dir)})")
-print(f"Docker Scripts Dir:        {docker_scripts_dir} (Exists: {os.path.exists(docker_scripts_dir)})")
-print(f"Files inside /app:         {os.listdir('/app') if os.path.exists('/app') else 'Folder /app not found'}")
+# NEW: See exactly what files are inside the scripts directory
+print(f"Files inside /app/scripts: {os.listdir(docker_scripts_dir) if os.path.exists(docker_scripts_dir) else 'Folder not found'}")
 print("--------------------------------------")
 
-# Line 23: Now we attempt the imports with all fallback paths secured
 try:
     import scrape_teams
     import scrape_park_info
@@ -38,7 +32,6 @@ try:
     import scrape_transactions
 except ModuleNotFoundError as e:
     print(f"\nCRITICAL IMPORT ERROR: {e}")
-    print("Your scripts folder might be missing from the container or named incorrectly.")
     sys.exit(1)
 
 from datetime import datetime, timedelta
