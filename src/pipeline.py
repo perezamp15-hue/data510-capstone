@@ -229,4 +229,3 @@ if __name__ == "__main__":
     target_year = int(sys.argv[1]) if len(sys.argv) > 1 else 2026
     run_pipeline(target_year)
 
-```
