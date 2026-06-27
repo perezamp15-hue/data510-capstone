@@ -5,21 +5,28 @@ def fetch_batter_splits(player_id: int, season: int):
     Queries MLB StatsAPI to grab traditional slash lines and extensive context 
     splits (vs handedness, home/away, surface type, and recent timeframes).
     """
-    # Define the situational codes used by MLB StatsAPI mapping
-    # 'vl'=vs LHP, 'vr'=vs RHP, 'h'=Home, 'a'=Away, 'd'=Day, 'n'=Night
-    situations = "group=[hitting],type=[statSplits],season=" + str(season)
-    url = f"https://statsapi.mlb.com/api/v1/people/{player_id}/stats?{situations}"
+    # Clean parameter formatting for the endpoint configuration
+    url = f"https://statsapi.mlb.com/api/v1/people/{player_id}/stats?group=hitting&type=statSplits&season={season}"
     
-    # We also query rolling data profiles for recent timelines
-    rolling_url = f"https://statsapi.mlb.com/api/v1/people/{player_id}/stats?group=[hitting],type=[byDateRange],season={season}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
 
-    response = requests.get(url)
     splits_payload = {
         "player_id": player_id,
         "season": season,
-        "splits": {}
+        "splits": {
+            "vs_lhp": None, "vs_rhp": None, "home": None, "away": None,
+            "day": None, "night": None, "grass": None, "turf": None
+        }
     }
     
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Connection timeout pulling splits for batter {player_id}: {e}")
+        return splits_payload
+        
     if response.status_code != 200:
         return splits_payload
 
@@ -34,7 +41,7 @@ def fetch_batter_splits(player_id: int, season: int):
         sit_code = split.get("split", {}).get("code")
         stat = split.get("stat", {})
         
-        # Calculate derived metrics like ISO and BABIP if missing from raw json
+        # Calculate derived metrics safely
         ab = stat.get("atBats", 0)
         hits = stat.get("hits", 0)
         bb = stat.get("baseOnBalls", 0)
@@ -44,13 +51,12 @@ def fetch_batter_splits(player_id: int, season: int):
         t_bases = stat.get("totalBases", 0)
         k = stat.get("strikeOuts", 0)
         
-        # Safe structural calculation helpers
-        iso = (t_bases - hits) / ab if ab > 0 else 0
+        iso = (t_bases - hits) / ab if ab > 0 else 0.0
         denom_babip = (ab - k - hr + sf)
-        babip = (hits - hr) / denom_babip if denom_babip > 0 else 0
+        babip = (hits - hr) / denom_babip if denom_babip > 0 else 0.0
         pa = ab + bb + hbp + sf
-        bb_pct = (bb / pa) * 100 if pa > 0 else 0
-        k_pct = (k / pa) * 100 if pa > 0 else 0
+        bb_pct = (bb / pa) * 100 if pa > 0 else 0.0
+        k_pct = (k / pa) * 100 if pa > 0 else 0.0
 
         metrics = {
             "avg": stat.get("avg"),
@@ -80,8 +86,5 @@ def fetch_batter_splits(player_id: int, season: int):
             splits_payload["splits"]["grass"] = metrics
         elif "turf" in split.get("split", {}).get("description", "").lower():
             splits_payload["splits"]["turf"] = metrics
-
-    # Logic blocks for rolling days (7, 15, 30 days) would run similarly 
-    # hitting the rolling_url filter using start/end date modifiers.
     
     return splits_payload
