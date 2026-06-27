@@ -3,7 +3,7 @@ from db_client import get_engine, fetch_api_json
 from sqlalchemy import text
 
 def run(target_date):
-    print(f"Syncing game officials and umpires matrix for: {target_date}")
+    print(f"Syncing game officials matrix for: {target_date}")
     engine = get_engine()
     
     # 1. Fetch all games for that date from our internal database
@@ -28,23 +28,35 @@ def run(target_date):
                     official_info = off.get('official', {})
                     umpire_id = int(official_info.get('id'))
                     umpire_name = official_info.get('fullName')
-                    position = off.get('officialType') # Home Plate, First Base, etc.
+                    position = off.get('officialType') # e.g., "Home Plate", "First Base"
                     
-                    # Ensure the master umpire row registry exists
+                    # STEP A: Safely insert/update the master registry table so names are preserved
                     txn_conn.execute(text("""
                         INSERT INTO umpires (umpire_id, umpire_name)
                         VALUES (:ump_id, :name)
-                        ON CONFLICT (umpire_id) DO UPDATE SET umpire_name = EXCLUDED.umpire_name;
+                        ON CONFLICT (umpire_id) DO UPDATE SET 
+                            umpire_name = EXCLUDED.umpire_name;
                     """), {"ump_id": umpire_id, "name": umpire_name})
                     
-                    # Note: If your schema uses an umpire_assignments linkage table, map it here.
-                    # Otherwise, this populates your base umpire table safely.
+                    # STEP B: Safely insert/update the game relationship linkage table
+                    txn_conn.execute(text("""
+                        INSERT INTO game_umpires (game_pk, umpire_id, umpire_name, position)
+                        VALUES (:game_pk, :ump_id, :name, :position)
+                        ON CONFLICT (game_pk, umpire_id) DO UPDATE SET 
+                            umpire_name = EXCLUDED.umpire_name,
+                            position = EXCLUDED.position;
+                    """), {
+                        "game_pk": pk, 
+                        "ump_id": umpire_id, 
+                        "name": umpire_name, 
+                        "position": position
+                    })
                     
         except Exception as e:
             print(f"Skipping game {pk} due to boxscore lookup error: {e}")
             continue
             
-    print("Umpires lookup verification completed.")
+    print("Dual-Table Umpire verification completed successfully.")
 
 if __name__ == "__main__":
     date_arg = sys.argv[1] if len(sys.argv) > 1 else "2026-06-22"
