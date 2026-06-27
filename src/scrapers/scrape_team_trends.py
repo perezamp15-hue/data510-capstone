@@ -1,6 +1,6 @@
 import requests
 
-def fetch_team_game_logs(team_id: int, season: int = 2026):
+def fetch_team_trends(season: int):
     """
     Scrapes every game log for a team in a given season to calculate 
     rolling trends (Last 5, 10, 20 games) for simulator context.
