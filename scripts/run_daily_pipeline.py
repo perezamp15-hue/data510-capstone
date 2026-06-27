@@ -1,20 +1,27 @@
 import sys
+import os
 from datetime import datetime, timedelta
 
-# Explicitly import your scrapers from the scripts package folder
-from scripts import scrape_statcast
-from scripts import scrape_game_feed
-from scripts import scrape_lineups
-from scripts import scrape_rosters
-from scripts import scrape_pitch_arsenal
-from scripts import scrape_defense
-from scripts import scrape_bullpen
-from scripts import scrape_weather
-from scripts import scrape_umpires
-from scripts import scrape_park_info
-from scripts import scrape_schedule
+# Force Python to look inside the current directory for sibling files
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
+
+# Import your neighbor scripts directly without any prefixes
+import scrape_statcast
+import scrape_game_feed
+import scrape_lineups
+import scrape_rosters
+import scrape_pitch_arsenal
+import scrape_defense
+import scrape_bullpen
+import scrape_weather
+import scrape_umpires
+import scrape_park_info
+import scrape_schedule
 
 def run_pipeline_for_date(target_date):
+    # ... Everything else inside this function remains exactly the same!
     print(f"\n=========================================")
     print(f"STARTING MLB PIPELINE FOR: {target_date}")
     print(f"=========================================\n")
