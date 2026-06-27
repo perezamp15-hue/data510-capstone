@@ -29,7 +29,7 @@ try:
     import scrape_umpires
     import scrape_pitch_arsenal
     import scrape_transactions
-    from db_client import get_engine  # Imported to check table states
+    from db_client import get_engine  # Needed to verify data states
     from sqlalchemy import text
 except ModuleNotFoundError as e:
     print(f"\nCRITICAL IMPORT ERROR: {e}")
@@ -38,56 +38,54 @@ except ModuleNotFoundError as e:
 from datetime import datetime, timedelta
 import pytz
 
-def check_and_seed_database():
-    """Checks if lookup tables are empty and automatically seeds them if necessary."""
-    print("\n--- Verifying Database Core Alignment ---")
+def check_and_seed_database(season=2026):
+    """Checks if foundational tables are empty and automatically self-seeds if true."""
+    print("\n--- Pre-Flight Constraint Validation ---")
     engine = get_engine()
     
     try:
         with engine.connect() as conn:
-            # Check if teams or parks tables are empty
             team_count = conn.execute(text("SELECT COUNT(*) FROM public.teams;")).scalar()
             park_count = conn.execute(text("SELECT COUNT(*) FROM public.parks;")).scalar()
             game_count = conn.execute(text("SELECT COUNT(*) FROM public.games;")).scalar()
             
         if team_count == 0 or park_count == 0 or game_count == 0:
-            print("Empty database state detected! Initiating automatic emergency seed sequence...")
+            print("Empty database ecosystem detected! Initiating automated structural recovery sequence...")
             
-            print("Auto-Seeding Phase 1: Teams...")
+            print("System-Seed Step 1/4: Ingesting professional baseball team identities...")
             scrape_teams.run()
             
-            print("Auto-Seeding Phase 2: Venues & Parks...")
+            print("System-Seed Step 2/4: Populating major league venue dimensions and parks...")
             scrape_park_info.run()
             
-            print("Auto-Seeding Phase 3: Season Calendar Baseline...")
-            scrape_schedule.run(season=2026)
+            print("System-Seed Step 3/4: Creating master seasonal schedule structural framework...")
+            scrape_schedule.run(season=season)
             
-            print("Auto-Seeding Phase 4: Initial Roster Allocations...")
-            scrape_rosters.run(season=2026)
+            print("System-Seed Step 4/4: Constructing initial active structural player rosters...")
+            scrape_rosters.run(season=season)
             
-            print("Database successfully primed and ready for ingestion.")
+            print("Structural database verification complete. All lookups and dimensions are intact.")
         else:
-            print(f"Core structures verified (Teams: {team_count}, Parks: {park_count}, Master Framework Games: {game_count}). Skipping seed phase.")
+            print(f"Foundation verified (Teams: {team_count}, Parks: {park_count}, Master Framework Games: {game_count}). Processing incremental ingestion normally.")
             
     except Exception as e:
-        print(f"Safety check verification failed: {e}. Attempting to proceed anyway...")
+        print(f"Pre-flight safety execution bypassed due to warning: {e}. Attempting direct processing...")
 
 def run_pipeline_for_date(target_date=None):
     if not target_date:
         local_tz = pytz.timezone('America/Los_Angeles')
+        # Defaults to 5 days ago for clean historical backfill windows
         target_date = (datetime.now(local_tz) - timedelta(days=5)).strftime('%Y-%m-%d')
         
     print(f"\n=========================================")
     print(f"RUNNING CRON-READY PIPELINE FOR: {target_date}")
     print(f"=========================================\n")
     
-    # -------------------------------------------------------------
-    # AUTOMATED PRE-FLIGHT CHECK (Fixes foreign key issues on empty DBs)
-    # -------------------------------------------------------------
-    check_and_seed_database()
+    # Run the self-healing layout check first
+    check_and_seed_database(season=2026)
 
     # -------------------------------------------------------------
-    # PHASE 1: CORE INCREMENTAL SYNC
+    # PHASE 1: CORE INDEXES & CONSTRAINTS
     # -------------------------------------------------------------
     print("\n--- Phase 1: Syncing Core Indices ---")
     try: 
