@@ -57,13 +57,14 @@ def run(start_date=None, end_date=None):
         pitches_inserted = 0
         pa_inserted = 0
         batted_balls_inserted = 0
+        pa_errors_logged = 0
+        pitch_errors_logged = 0
 
         # --- STEP 1: POPULATE PARENTS FIRST (plate_appearances) ---
         print("Extracting final matchup events to populate plate_appearances...")
         pa_df = df.sort_values(by=['game_pk', 'at_bat_number', 'pitch_number'])
         pa_df = pa_df.groupby('derived_pa_id').last().reset_index()
 
-        # Execute row-by-row with individual contexts to isolate schema variances cleanly
         for _, row in pa_df.iterrows():
             pa_data = {
                 "plate_appearance_id": row.get("derived_pa_id"),
@@ -96,7 +97,9 @@ def run(start_date=None, end_date=None):
                     """), pa_data)
                 pa_inserted += 1
             except Exception as e:
-                # If 'inning' or something else also happens to be missing, fail gracefully row-by-row
+                if pa_errors_logged < 3:
+                    print(f"DEBUG: Plate Appearance Insert Error: {e}")
+                    pa_errors_logged += 1
                 continue
 
         # --- STEP 2: POPULATE CHILDREN SECOND (statcast_pitches) ---
@@ -174,7 +177,10 @@ def run(start_date=None, end_date=None):
                             play_description = EXCLUDED.play_description;
                     """), pitch_data)
                     pitches_inserted += 1
-                except Exception:
+                except Exception as e:
+                    if pitch_errors_logged < 1:
+                        print(f"DEBUG: Pitch Insert Error: {e}")
+                        pitch_errors_logged += 1
                     continue
 
         # --- STEP 3: POPULATE BATTED BALL DETAILS LAST (statcast_batted_balls) ---
