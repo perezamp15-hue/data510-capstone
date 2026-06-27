@@ -1,6 +1,6 @@
 import requests
 
-def fetch_umpire_season_trends(umpire_name: str, season: int = 2026):
+def fetch_umpire_trends(season: int):
     """
     Aggregates historical game outcomes officiated by a specific home plate 
     umpire to uncover tendencies in strike zone size, over/under ratios, 
