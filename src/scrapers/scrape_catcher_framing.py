@@ -1,5 +1,5 @@
 import pandas as pd
-import requests
+import cloudscraper
 from io import StringIO
 
 def fetch_catcher_framing_metrics(season: int = 2026):
@@ -14,11 +14,6 @@ def fetch_catcher_framing_metrics(season: int = 2026):
     pop_url = f"https://baseballsavant.mlb.com/leaderboard/poptime?year={season}&team=&min_throws=0&csv=true"
     
     catcher_map = {}
-    
-    # FIX 1: Mask the Python scraper as a normal web browser to bypass Cloudflare
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
     
     # Process Framing & Strike %
     res_frame = requests.get(framing_url, headers=headers)
