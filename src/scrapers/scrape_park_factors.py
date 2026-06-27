@@ -1,5 +1,5 @@
 import pandas as pd
-import requests
+import cloudscraper
 from io import StringIO
 
 def fetch_statcast_park_factors(season: int = 2026):
