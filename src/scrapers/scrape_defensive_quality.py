@@ -1,5 +1,6 @@
 import pandas as pd
 import requests
+import cloudscraper
 from io import StringIO
 
 def fetch_team_defensive_quality(season: int = 2026):
@@ -15,7 +16,7 @@ def fetch_team_defensive_quality(season: int = 2026):
     
     defense_payload = {}
 
-    # Step 1: Gather Errors and Double Plays
+    # Step 1: Gather Errors and Double Plays (Official MLB API - standard requests is fine)
     res_mlb = requests.get(mlb_url)
     if res_mlb.status_code == 200:
         teams_list = res_mlb.json().get("stats", [{}])[0].get("splits", [])
@@ -34,12 +35,10 @@ def fetch_team_defensive_quality(season: int = 2026):
             }
 
     # Step 2: Hydrate with Outs Above Average (OAA) via Savant CSV Stream
-    # FIX: Mask the Python scraper as a normal web browser to bypass Cloudflare
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
+    # Create the Cloudflare-bypassing scraper specifically for Savant
+    scraper = cloudscraper.create_scraper()
+    res_savant = scraper.get(savant_url)
     
-    res_savant = requests.get(savant_url, headers=headers)
     if res_savant.status_code == 200:
         csv_data = StringIO(res_savant.text)
         try:
