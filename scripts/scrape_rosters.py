@@ -1,5 +1,6 @@
 import sys
 import pandas as pd
+import numpy as np  # Imported to handle NaN values
 from db_client import get_engine, fetch_api_json
 from sqlalchemy import text
 
@@ -12,17 +13,34 @@ def run(season=2026):
         parsed = []
         engine = get_engine()
         valid_teams = pd.read_sql("SELECT team_id FROM teams", con=engine)['team_id'].tolist()
+        
         for p in people:
             t_id = p.get('currentTeam', {}).get('id')
             if not t_id or int(t_id) not in valid_teams: continue
+            
+            # Extract debut date cleanly
+            debut_date = p.get('mlbDebutDate')
+            
             parsed.append({
-                "player_id": int(p.get('id')), "full_name": p.get('fullName'), "current_team_id": int(t_id),
-                "position_code": p.get('primaryPosition', {}).get('code'), "bats": p.get('batSide', {}).get('code'),
-                "throws": p.get('pitchHand', {}).get('code'), "birth_date": p.get('birthDate'), "height": p.get('height'),
-                "weight": int(p.get('weight')) if p.get('weight') else None, "mlb_debut": p.get('mlbDebutDate'), "is_active": p.get('active', True)
+                "player_id": int(p.get('id')), 
+                "full_name": p.get('fullName'), 
+                "current_team_id": int(t_id),
+                "position_code": p.get('primaryPosition', {}).get('code'), 
+                "bats": p.get('batSide', {}).get('code'),
+                "throws": p.get('pitchHand', {}).get('code'), 
+                "birth_date": p.get('birthDate'), 
+                "height": p.get('height'),
+                "weight": int(p.get('weight')) if p.get('weight') else None, 
+                "mlb_debut": debut_date if debut_date else None, # Prevent raw API blanks
+                "is_active": p.get('active', True)
             })
+            
         df = pd.DataFrame(parsed)
         if df.empty: return
+        
+        # CRON SAFETY FIX: Replace pandas NaN values with None so Postgres sees them as NULL dates
+        df = df.replace({np.nan: None})
+        
         with engine.begin() as conn:
             for _, row in df.iterrows():
                 conn.execute(text("""
@@ -30,6 +48,9 @@ def run(season=2026):
                     VALUES (:player_id, :full_name, :current_team_id, :position_code, :bats, :throws, :birth_date, :height, :weight, :mlb_debut, :is_active)
                     ON CONFLICT (player_id) DO UPDATE SET full_name = EXCLUDED.full_name, current_team_id = EXCLUDED.current_team_id, position_code = EXCLUDED.position_code, bats = EXCLUDED.bats, throws = EXCLUDED.throws, birth_date = EXCLUDED.birth_date, height = EXCLUDED.height, weight = EXCLUDED.weight, mlb_debut = EXCLUDED.mlb_debut, is_active = EXCLUDED.is_active;
                 """), row.to_dict())
-    except Exception as e: print(f"Rosters Error: {e}")
+                
+        print(f"Roster update completed successfully for {len(df)} players.")
+    except Exception as e: 
+        print(f"Rosters Error: {e}")
 
 if __name__ == "__main__": run()
