@@ -37,24 +37,22 @@ def run():
         surface = field.get('surface', 'Grass')  
         roof = field.get('roofType', 'Open')
         
-        if not lat or not lon:
-            # Skip fields without geographic coordinates
-            continue
+        # FIX: Safe extraction instead of skipping with `continue`
+        latitude = float(lat) if lat is not None else None
+        longitude = float(lon) if lon is not None else None
 
-        latitude = float(lat)
-        longitude = float(lon)
-
-        # 2. Dynamically calculate accurate elevations using coordinates
+        # 2. Dynamically calculate accurate elevations ONLY if coordinates exist
         elevation_meters = 0
-        try:
-            geo_url = f"https://api.open-elevation.com/api/v1/lookup?locations={latitude},{longitude}"
-            geo_res = requests.get(geo_url, timeout=5).json()
-            results = geo_res.get('results', [])
-            if results:
-                # Convert meters to feet for typical baseball park standards
-                elevation_meters = int(results[0].get('elevation', 0) * 3.28084)
-        except Exception:
-            elevation_meters = 0
+        if latitude is not None and longitude is not None:
+            try:
+                geo_url = f"https://api.open-elevation.com/api/v1/lookup?locations={latitude},{longitude}"
+                geo_res = requests.get(geo_url, timeout=5).json()
+                results = geo_res.get('results', [])
+                if results:
+                    # Convert meters to feet for typical baseball park standards
+                    elevation_meters = int(results[0].get('elevation', 0) * 3.28084)
+            except Exception:
+                elevation_meters = 0
 
         processed_parks.append({
             "park_id": int(park_id),
