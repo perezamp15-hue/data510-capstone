@@ -1,28 +1,37 @@
 import requests
 
-def fetch_umpire_trends(season: int):
+def fetch_umpire_trends(umpire_name: str, season: int):
     """
     Aggregates historical game outcomes officiated by a specific home plate 
     umpire to uncover tendencies in strike zone size, over/under ratios, 
     and general performance distributions.
+    
+    Optimized to fetch all nested team stats in a single batched API payload.
     """
-    # MLB StatsAPI allows fetching game schedules filtered by an official's name
-    url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&season={season}&hydrate=linescore,officials"
-    response = requests.get(url)
+    # FIXED: Added boxscore(pitching) hydration to eliminate N+1 sub-requests entirely
+    url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&season={season}&hydrate=linescore,officials,boxscore(pitching)"
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    }
     
     trends = {
         "umpire_name": umpire_name,
         "season": season,
         "games_officiated": 0,
-        "strike_zone_size_proxy": None, # Average total pitches per game (proxy for zone size)
-        "over_pct": 0.0,
+        "strike_zone_size_proxy": None,  # Average total pitches per game (proxy for zone size)
         "home_team_win_pct": 0.0,
         "walk_pct": 0.0,
         "strikeout_pct": 0.0
     }
     
-    if response.status_code != 200:
-        print(f"Error accessing schedule logs for umpire tracking.")
+    try:
+        response = requests.get(url, headers=headers, timeout=25)
+        if response.status_code != 200:
+            print(f"Error accessing schedule logs for umpire tracking.")
+            return trends
+    except requests.exceptions.RequestException as e:
+        print(f"Connection timeout fetching umpire schedules: {e}")
         return trends
         
     data = response.json()
@@ -50,41 +59,33 @@ def fetch_umpire_trends(season: int):
             if not is_home_plate:
                 continue
                 
-            # Game details check (Ensure the matchup concluded)
-            linescore = game.get("linescore", {})
+            # Ensure the matchup concluded
             if game.get("status", {}).get("abstractGameState") != "Final":
                 continue
                 
+            linescore = game.get("linescore", {})
             total_games += 1
             
             # --- Home Team Win Tracking ---
-            home_score = linescore.get("teams", {}).get("home", {}).get("runs", 0)
-            away_score = linescore.get("teams", {}).get("away", {}).get("runs", 0)
+            home_score = int(linescore.get("teams", {}).get("home", {}).get("runs", 0) or 0)
+            away_score = int(linescore.get("teams", {}).get("away", {}).get("runs", 0) or 0)
             if home_score > away_score:
                 home_wins += 1
                 
             total_runs += (home_score + away_score)
             
-            # --- Deeper Boxscore Iteration for Team Totals ---
-            # Extract pitch metrics, walks, and Ks from this game's specific endpoint
-            game_pk = game.get("gamePk")
-            box_url = f"https://statsapi.mlb.com/api/v1/game/{game_pk}/boxscore"
-            box_res = requests.get(box_url)
+            # --- Bulk Hydrated Boxscore Processing (No Extra HTTP Requests Required) ---
+            teams_data = game.get("boxscore", {}).get("teams", {})
             
-            if box_res.status_code == 200:
-                b_data = box_res.json()
-                teams_data = b_data.get("teams", {})
+            for side in ["home", "away"]:
+                team_stats = teams_data.get(side, {}).get("teamStats", {}).get("pitching", {})
                 
-                for side in ["home", "away"]:
-                    team_stats = teams_data.get(side, {}).get("teamStats", {}).get("pitching", {})
-                    total_walks += team_stats.get("baseOnBalls", 0)
-                    total_strikeouts += team_stats.get("strikeOuts", 0)
-                    total_pitches += team_stats.get("pitchesThrown", 0)
-                    total_plate_appearances += team_stats.get("battersFaced", 0)
+                total_walks += int(team_stats.get("baseOnBalls", 0) or 0)
+                total_strikeouts += int(team_stats.get("strikeOuts", 0) or 0)
+                total_pitches += int(team_stats.get("pitchesThrown", 0) or 0)
+                total_plate_appearances += int(team_stats.get("battersFaced", 0) or 0)
 
     if total_games > 0:
-        # Assuming a baseline standard market line of 8.5 total runs for Over/Under proxy tracking
-        # Alternatively, you can cross-reference an odds API here.
         trends.update({
             "games_officiated": total_games,
             "strike_zone_size_proxy": round(total_pitches / total_games, 1),
