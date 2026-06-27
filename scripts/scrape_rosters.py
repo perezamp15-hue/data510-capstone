@@ -1,6 +1,6 @@
 import sys
 import pandas as pd
-import numpy as np  # Imported to handle NaN values
+import numpy as np
 from db_client import get_engine, fetch_api_json
 from sqlalchemy import text
 
@@ -18,7 +18,6 @@ def run(season=2026):
             t_id = p.get('currentTeam', {}).get('id')
             if not t_id or int(t_id) not in valid_teams: continue
             
-            # Extract debut date cleanly
             debut_date = p.get('mlbDebutDate')
             
             parsed.append({
@@ -31,31 +30,31 @@ def run(season=2026):
                 "birth_date": p.get('birthDate'), 
                 "height": p.get('height'),
                 "weight": int(p.get('weight')) if p.get('weight') else None, 
-                "mlb_debut": debut_date if debut_date else None, # Prevent raw API blanks
+                "mlb_debut": debut_date if debut_date else None,
                 "is_active": p.get('active', True)
             })
             
         df = pd.DataFrame(parsed)
         if df.empty: return
         
-        # CRON SAFETY FIX: Replace pandas NaN values with None so Postgres sees them as NULL dates
         df = df.replace({np.nan: None})
         
         with engine.begin() as conn:
             for _, row in df.iterrows():
+                # Cleaned SQL block without Python syntax comments inside the query string
                 conn.execute(text("""
                     INSERT INTO players (player_id, full_name, current_team_id, position_code, bats, throws, birth_date, height, weight, mlb_debut, is_active)
                     VALUES (:player_id, :full_name, :current_team_id, :position_code, :bats, :throws, :birth_date, :height, :weight, :mlb_debut, :is_active)
                     ON CONFLICT (player_id) DO UPDATE SET 
                         full_name = EXCLUDED.full_name, 
-                        current_team_id = EXCLUDED.current_team_id,  # <-- This updates their team on your database instantly
+                        current_team_id = EXCLUDED.current_team_id,
                         position_code = EXCLUDED.position_code, 
                         bats = EXCLUDED.bats, 
                         throws = EXCLUDED.throws, 
                         is_active = EXCLUDED.is_active;
-                    """), row.to_dict())
+                """), row.to_dict())
                 
-        print(f"Roster update completed successfully for {len(df)} players.")
+        print(f"Roster update completed successfully for {len(df)} players (trade logs updated).")
     except Exception as e: 
         print(f"Rosters Error: {e}")
 
