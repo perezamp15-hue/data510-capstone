@@ -55,9 +55,17 @@ def run(target_date):
         loser_id = decisions.get('loser', {}).get('id')
         save_id = decisions.get('save', {}).get('id')
 
-        # Timestamps and Meta
         day_night_type = g.get('dayNight')
-        raw_start_time = g.get('gameDate') # Raw start timestamp string from API
+
+        # TIME SPLITTING LOGIC
+        raw_game_date = g.get('gameDate') # e.g., "2026-06-22T22:10:00Z"
+        parsed_time = None
+        if raw_game_date and 'T' in raw_game_date:
+            try:
+                # Extracts "22:10:00" from the ISO string
+                parsed_time = raw_game_date.split('T')[1].replace('Z', '')
+            except Exception:
+                parsed_time = None
 
         # Parse Info array (Attendance and Duration)
         game_info = g.get('boxscore', {}).get('info', [])
@@ -78,23 +86,18 @@ def run(target_date):
                     duration_mins = int(parts[0]) * 60 + int(parts[1])
                 except: pass
 
-        # Fallback duration check if 'T' was structured weirdly
-        if not duration_mins and g.get('gameTimeMinutes'):
-            try: duration_mins = int(g.get('gameTimeMinutes'))
-            except: pass
-
         # Scores
         linescore = g.get('linescore', {})
         home_score = linescore.get('teams', {}).get('home', {}).get('runs')
         away_score = linescore.get('teams', {}).get('away', {}).get('runs')
 
-        # Unified Payload
+        # Map to query payload
         game_data = {
             "game_pk": int(game_pk),
             "game_date": target_date,
             "season": season_year,
             "game_type": game_type,
-            "game_start_time": raw_start_time, # Fallback assignment for game start time
+            "extracted_time": parsed_time, # Matches the clean time string
             "park_id": int(api_venue_id) if api_venue_id else None, 
             "home_team_id": int(home_team_id) if home_team_id else None,
             "away_team_id": int(away_team_id) if away_team_id else None,
@@ -110,15 +113,16 @@ def run(target_date):
 
         try:
             with engine.begin() as conn:
+                # NOTE: Replace 'game_time' below with your exact DB column name if it differs!
                 conn.execute(text("""
                     INSERT INTO games (
-                        game_pk, game_date, season, game_type, game_start_time, park_id, 
+                        game_pk, game_date, season, game_type, game_time, park_id, 
                         home_team_id, away_team_id, day_night_type, 
                         attendance, game_duration_minutes, home_score, away_score,
                         winning_pitcher_id, losing_pitcher_id, save_pitcher_id
                     )
                     VALUES (
-                        :game_pk, :game_date, :season, :game_type, :game_start_time, :park_id, 
+                        :game_pk, :game_date, :season, :game_type, :extracted_time, :park_id, 
                         :home_team_id, :away_team_id, :day_night_type, 
                         :attendance, :game_duration_minutes, :home_score, :away_score,
                         :winning_pitcher_id, :losing_pitcher_id, :save_pitcher_id
@@ -128,7 +132,7 @@ def run(target_date):
                         game_date = EXCLUDED.game_date,
                         season = EXCLUDED.season,
                         game_type = EXCLUDED.game_type,
-                        game_start_time = EXCLUDED.game_start_time,
+                        game_time = EXCLUDED.game_time,
                         day_night_type = EXCLUDED.day_night_type,
                         attendance = EXCLUDED.attendance,
                         game_duration_minutes = EXCLUDED.game_duration_minutes,
@@ -142,7 +146,7 @@ def run(target_date):
         except Exception as db_err:
             print(f"Database write failure for Game {game_pk}: {db_err}")
 
-    print(f"Game Feed Complete: Successfully updated {inserted_games} games with start times.")
+    print(f"Game Feed Complete: Successfully updated {inserted_games} games with custom time parsing.")
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
