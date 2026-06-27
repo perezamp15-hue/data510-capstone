@@ -1,13 +1,14 @@
 import sys
 import os
 from datetime import datetime, timedelta
+import pytz
 
 # Force Python to treat the scripts directory as a core lookup folder
 scripts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'scripts')
 if scripts_dir not in sys.path:
     sys.path.insert(0, scripts_dir)
 
-# Standard module imports matching your directory layout
+# Core script module imports
 import scrape_statcast
 import scrape_game_feed
 import scrape_lineups
@@ -69,10 +70,18 @@ def run_pipeline_for_date(target_date):
 
 if __name__ == '__main__':
     if len(sys.argv) > 1:
-        # Allows you to pass a custom date manually if you ever need a historic backfill
         run_pipeline_for_date(sys.argv[1])
     else:
-        # Dynamically targets exactly 24 hours ago to guarantee finalized boxscores
-        yesterday_str = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
-        print(f"Automated pipeline running for finalized data from yesterday...")
+        # Enforce MLB operational timezone alignment (US/Eastern)
+        mlb_tz = pytz.timezone('US/Eastern')
+        current_time_mlb = datetime.now(mlb_tz)
+        
+        # Calculate exactly 1 calendar day backward from US/Eastern perspective
+        yesterday_mlb = current_time_mlb - timedelta(days=1)
+        yesterday_str = yesterday_mlb.strftime('%Y-%m-%d')
+        
+        print(f"Server (UTC): {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"MLB local time context: {current_time_mlb.strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"Targeting finalized dates for: {yesterday_str}")
+        
         run_pipeline_for_date(yesterday_str)
