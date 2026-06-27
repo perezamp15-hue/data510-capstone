@@ -8,7 +8,7 @@ base_dir = os.path.dirname(os.path.abspath(__file__))
 scripts_dir = os.path.join(base_dir, 'scripts')
 docker_scripts_dir = "/app/scripts"
 
-# Make sure Python knows exactly where to find your files
+# Align execution paths
 for path in [scripts_dir, docker_scripts_dir, base_dir]:
     if os.path.exists(path) and path not in sys.path:
         sys.path.insert(0, path)
@@ -18,7 +18,6 @@ print(f"Current Working Directory: {os.getcwd()}")
 print(f"Calculated Scripts Dir:    {scripts_dir}")
 print("--------------------------------------")
 
-# Lazy load core modules to minimize runtime execution weight
 try:
     import scrape_game_feed
     import scrape_statcast
@@ -34,11 +33,7 @@ except ModuleNotFoundError as e:
     sys.exit(1)
 
 def run_isolated_script(script_name, *args):
-    """Executes a script as an isolated standalone shell process.
-    
-    This ensures that each script runs inside its own execution layer, 
-    matching terminal call behavior perfectly.
-    """
+    """Executes a scrap script in a clean, isolated shell process."""
     script_path = os.path.join(scripts_dir, script_name)
     if not os.path.exists(script_path):
         script_path = os.path.join(base_dir, script_name)
@@ -47,10 +42,10 @@ def run_isolated_script(script_name, *args):
     print(f"Spawning Process: {' '.join(cmd)}")
     
     try:
-        # Runs the script and automatically pipes output directly to your Railway log terminal
+        # Stream the script's native terminal output directly into your Railway log screen
         subprocess.run(cmd, check=True)
     except subprocess.CalledProcessError as e:
-        print(f"Process {script_name} encountered an issue. Continuing pipeline execution...")
+        print(f"Process {script_name} returned an error. Moving forward with pipeline...")
 
 def run_pipeline_for_date(target_date=None):
     if not target_date:
@@ -62,12 +57,11 @@ def run_pipeline_for_date(target_date=None):
     print(f"=========================================\n")
     
     # -------------------------------------------------------------
-    # PHASE 1: CORE INDEXES & CONSTRAINTS (Runs Daily, Safely Skips Existing Rows)
+    # PHASE 1: FORCE FILL BASE CONSTRAINTS (Isolated Shells)
     # -------------------------------------------------------------
     print("--- Phase 1: Syncing Core Indices ---")
     
-    # These execute as separate process threads every day. 
-    # If the rows exist, your internal DB conflict logic bypasses them automatically.
+    # Spawning these natively guarantees they load their default configurations cleanly
     run_isolated_script("scrape_teams.py")
     run_isolated_script("scrape_park_info.py")
     run_isolated_script("scrape_schedule.py", "2026")
