@@ -18,7 +18,7 @@ def fetch_lineup_positions(player_id: int, season: int):
     try:
         response = requests.get(url, headers=headers, timeout=10)
     except requests.exceptions.RequestException as e:
-        print(f"❌ Connection timeout pulling lineup splits for batter {player_id}: {e}")
+        print(f"Connection timeout pulling lineup splits for batter {player_id}: {e}")
         return {
             "player_id": player_id,
             "season": season,
@@ -33,7 +33,7 @@ def fetch_lineup_positions(player_id: int, season: int):
     }
     
     if response.status_code != 200:
-        print(f"⚠️ Error pulling lineup splits for batter {player_id} (Status: {response.status_code})")
+        print(f"Error pulling lineup splits for batter {player_id} (Status: {response.status_code})")
         return lineup_payload
         
     data = response.json()
