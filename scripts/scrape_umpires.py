@@ -12,7 +12,6 @@ def run(target_date=None):
     
     print(f"Syncing game umpires directly via API Schedule for window: {target_date}")
     
-    # FIX: Fetch schedule IDs directly from the API to bypass database timestamp format issues
     schedule_url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={target_date}"
     try:
         schedule_data = fetch_api_json(schedule_url)
@@ -20,10 +19,23 @@ def run(target_date=None):
         if not dates_node:
             print(f"No games found on schedule for date: {target_date}")
             return
-        valid_games = [g.get('gamePk') for g in dates_node[0].get('games', []) if g.get('gamePk')]
+        api_games = [g.get('gamePk') for g in dates_node[0].get('games', []) if g.get('gamePk')]
     except Exception as e:
         print(f"Schedule extraction failed: {e}")
         return
+        
+    # --- FIX: Cross-reference with master games table to respect Foreign Keys ---
+    engine = get_engine()
+    try:
+        db_games = pd.read_sql("SELECT game_pk FROM games", con=engine)['game_pk'].tolist()
+        valid_games = [pk for pk in api_games if pk in db_games]
+        if not valid_games:
+            print("No matching games found in the master database table for today.")
+            return
+    except Exception as e:
+        print(f"Database integrity cross-reference failed: {e}")
+        return
+    # --------------------------------------------------------------------------
         
     all_umps = {}
     assignments = []
@@ -58,7 +70,6 @@ def run(target_date=None):
         print("No official umpire configurations found inside game boxscores.")
         return
     
-    engine = get_engine()
     with engine.begin() as conn:
         for u_id, u_name in all_umps.items():
             conn.execute(text("""
