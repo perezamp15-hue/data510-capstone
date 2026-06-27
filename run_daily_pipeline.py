@@ -29,6 +29,8 @@ try:
     import scrape_umpires
     import scrape_pitch_arsenal
     import scrape_transactions
+    from db_client import get_engine  # Imported to check table states
+    from sqlalchemy import text
 except ModuleNotFoundError as e:
     print(f"\nCRITICAL IMPORT ERROR: {e}")
     sys.exit(1)
@@ -36,10 +38,43 @@ except ModuleNotFoundError as e:
 from datetime import datetime, timedelta
 import pytz
 
+def check_and_seed_database():
+    """Checks if lookup tables are empty and automatically seeds them if necessary."""
+    print("\n--- Verifying Database Core Alignment ---")
+    engine = get_engine()
+    
+    try:
+        with engine.connect() as conn:
+            # Check if teams or parks tables are empty
+            team_count = conn.execute(text("SELECT COUNT(*) FROM public.teams;")).scalar()
+            park_count = conn.execute(text("SELECT COUNT(*) FROM public.parks;")).scalar()
+            game_count = conn.execute(text("SELECT COUNT(*) FROM public.games;")).scalar()
+            
+        if team_count == 0 or park_count == 0 or game_count == 0:
+            print("Empty database state detected! Initiating automatic emergency seed sequence...")
+            
+            print("Auto-Seeding Phase 1: Teams...")
+            scrape_teams.run()
+            
+            print("Auto-Seeding Phase 2: Venues & Parks...")
+            scrape_park_info.run()
+            
+            print("Auto-Seeding Phase 3: Season Calendar Baseline...")
+            scrape_schedule.run(season=2026)
+            
+            print("Auto-Seeding Phase 4: Initial Roster Allocations...")
+            scrape_rosters.run(season=2026)
+            
+            print("Database successfully primed and ready for ingestion.")
+        else:
+            print(f"Core structures verified (Teams: {team_count}, Parks: {park_count}, Master Framework Games: {game_count}). Skipping seed phase.")
+            
+    except Exception as e:
+        print(f"Safety check verification failed: {e}. Attempting to proceed anyway...")
+
 def run_pipeline_for_date(target_date=None):
     if not target_date:
         local_tz = pytz.timezone('America/Los_Angeles')
-        # Defaults to 5 days ago for clean historical backfill windows
         target_date = (datetime.now(local_tz) - timedelta(days=5)).strftime('%Y-%m-%d')
         
     print(f"\n=========================================")
@@ -47,9 +82,14 @@ def run_pipeline_for_date(target_date=None):
     print(f"=========================================\n")
     
     # -------------------------------------------------------------
-    # PHASE 1: CORE INDEXES & CONSTRAINTS (Strict Structural Seeding)
+    # AUTOMATED PRE-FLIGHT CHECK (Fixes foreign key issues on empty DBs)
     # -------------------------------------------------------------
-    print("--- Phase 1: Syncing Core Indices ---")
+    check_and_seed_database()
+
+    # -------------------------------------------------------------
+    # PHASE 1: CORE INCREMENTAL SYNC
+    # -------------------------------------------------------------
+    print("\n--- Phase 1: Syncing Core Indices ---")
     try: 
         scrape_teams.run()
     except Exception as e: 
@@ -61,7 +101,6 @@ def run_pipeline_for_date(target_date=None):
         print(f"Parks sync failed: {e}")
 
     try: 
-        # Explicitly targets the master calendar framework next so parent games exist
         scrape_schedule.run(season=2026)
     except Exception as e: 
         print(f"Schedule sync failed: {e}")
@@ -72,7 +111,7 @@ def run_pipeline_for_date(target_date=None):
         print(f"Roster sync failed: {e}")
 
     # -------------------------------------------------------------
-    # PHASE 2: PRIMARY EVENT INGESTION (Boxscore / Game Layer)
+    # PHASE 2: PRIMARY EVENT INGESTION
     # -------------------------------------------------------------
     print("\n--- Phase 2: Ingesting Daily Game Feeds ---")
     try: 
@@ -83,7 +122,7 @@ def run_pipeline_for_date(target_date=None):
         return
 
     # -------------------------------------------------------------
-    # PHASE 3: DEPENDENT TELEMETRY & METRICS (Children Layer)
+    # PHASE 3: DEPENDENT TELEMETRY & METRICS
     # -------------------------------------------------------------
     print("\n--- Phase 3: Processing Dependent Telemetry ---")
     try: 
