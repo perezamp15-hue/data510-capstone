@@ -1,36 +1,32 @@
 import sys
-from datetime import datetime, timedelta
 import pandas as pd
-from scripts.db_client import get_engine, fetch_api_json
+from datetime import datetime, timedelta
+import pytz
+from db_client import get_engine, fetch_api_json
+from sqlalchemy import text
 
-def run(date_str=None):
-    if not date_str:
-        date_str = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
-        
-    sched_url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={date_str}"
-    sched_data = fetch_api_json(sched_url)
-    
-    weather_records = []
-    for date_obj in sched_data.get("dates", []):
-        for g in date_obj.get("games", []):
-            game_pk = g.get("gamePk")
-            live_url = f"https://statsapi.mlb.com/api/v1/game/{game_pk}/feed/live"
-            try:
-                live_data = fetch_api_json(live_url)
-                w = live_data.get("gameData", {}).get("weather", {})
-                info = live_data.get("gameData", {}).get("gameInfo", {})
-                
-                weather_records.append({
-                    "game_pk": game_pk,
-                    "temperature": w.get("temp"),
-                    "humidity": w.get("humidity"),
-                    "wind_speed": w.get("wind"),
-                    "condition": w.get("condition"),
-                    "roof_open": True if info.get("roof") == "Open" else False,
-                    "roof_closed": True if info.get("roof") == "Closed" else False
-                })
-            except Exception as e:
-                print(f"No weather context loaded for {game_pk}: {e}")
+def run(target_date=None):
+    if not target_date:
+        local_tz = pytz.timezone('America/Los_Angeles')
+        target_date = (datetime.now(local_tz) - timedelta(days=1)).strftime('%Y-%m-%d')
+    engine = get_engine()
+    try: valid_games = pd.read_sql("SELECT game_pk FROM games WHERE game_date = %s", con=engine, params=(target_date,))['game_pk'].tolist()
+    except Exception: return
+    for pk in valid_games:
+        url = f"https://statsapi.mlb.com/api/v1/game/{pk}/feed/live"
+        try:
+            data = fetch_api_json(url)
+            info = data.get('gameData', {}).get('weather', {})
+            temp_str = info.get('temp')
+            if not temp_str: continue
+            w_dict = {"game_pk": pk, "temperature_f": int(temp_str), "sky_condition": info.get('condition'), "wind_speed_mph": info.get('wind'), "wind_direction": info.get('direction')}
+            with engine.begin() as conn:
+                conn.execute(text("""
+                    INSERT INTO game_weather (game_pk, temperature_f, sky_condition, wind_speed_mph, wind_direction)
+                    VALUES (:game_pk, :temperature_f, :sky_condition, :wind_speed_mph, :wind_direction)
+                    ON CONFLICT (game_pk) DO UPDATE SET temperature_f = EXCLUDED.temperature_f, sky_condition = EXCLUDED.sky_condition;
+                """), w_dict)
+        except Exception: continue
 
-    if weather_records:
-        pd.DataFrame(weather_records).to_sql('game_weather', get_engine(), if_exists='append', index=False)
+if __name__ == "__main__":
+    run(sys.argv[1] if len(sys.argv) > 1 else None)
