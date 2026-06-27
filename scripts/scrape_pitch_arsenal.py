@@ -1,5 +1,5 @@
 import pandas as pd
-from db_client import get_engine
+from scripts.db_client import get_engine, fetch_api_json
 
 def run():
     print("Deriving Custom Pitch Arsenals via Statcast historical records...")
