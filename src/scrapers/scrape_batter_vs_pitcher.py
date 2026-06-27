@@ -1,32 +1,38 @@
 import requests
 
-def fetch_batter_vs_pitcher_history(batter_id: int, pitcher_id: int):
+def fetch_batter_vs_pitcher(batter_id: int, pitcher_id: int):
     """
     Scrapes the exact historical career matchup data between a specific 
     batter and pitcher using their unique MLB ID numbers.
     """
-    # StatsAPI endpoint parameters explicitly targeting vsPlayer behavior
     url = (
         f"https://statsapi.mlb.com/api/v1/people/{batter_id}/stats"
         f"?stats=vsPlayer&group=hitting&opposingPlayerId={pitcher_id}"
     )
     
-    response = requests.get(url)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    }
     
     bvp_payload = {
         "batter_id": batter_id,
         "pitcher_id": pitcher_id,
         "plate_appearances": 0,
-        "avg": .000,
-        "ops": .000,
+        "avg": 0.000,
+        "ops": 0.000,
         "strikeouts": 0,
         "walks": 0,
         "home_runs": 0,
         "avg_exit_velocity": None
     }
     
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+    except requests.exceptions.RequestException as e:
+        print(f"Connection timeout fetching matchup for Hitter:{batter_id} vs Pitcher:{pitcher_id}")
+        return bvp_payload
+        
     if response.status_code != 200:
-        print(f"Error fetching matchup for Hitter:{batter_id} vs Pitcher:{pitcher_id}")
         return bvp_payload
         
     data = response.json()
@@ -36,23 +42,28 @@ def fetch_batter_vs_pitcher_history(batter_id: int, pitcher_id: int):
         
     splits = stats_list[0].get("splits", [])
     if not splits:
-        # No historical matchups recorded between these two players yet
         return bvp_payload
         
-    # Extract the total career aggregation metric block
     stat = splits[0].get("stat", {})
     
+    # Safe float conversion helper to prevent crash on unexpected empty string representations
+    def safe_float(val):
+        try:
+            return float(val) if val not in (None, "", "null", ".---") else 0.0
+        except ValueError:
+            return 0.0
+
     bvp_payload.update({
         "plate_appearances": stat.get("plateAppearances", 0),
-        "avg": float(stat.get("avg", ".000")),
-        "ops": float(stat.get("ops", ".000")),
+        "avg": safe_float(stat.get("avg")),
+        "ops": safe_float(stat.get("ops")),
         "strikeouts": stat.get("strikeOuts", 0),
         "walks": stat.get("baseOnBalls", 0),
         "home_runs": stat.get("homeRuns", 0)
     })
     
-    # Advanced Statcast tracking values inside matchup metrics
-    # Note: If they haven't faced each other in the Statcast era, this handles a clean fallback
-    bvp_payload["avg_exit_velocity"] = stat.get("hitData", {}).get("launchSpeed")
+    # Advanced tracking values inside matchup metrics
+    hit_data = stat.get("hitData", {})
+    bvp_payload["avg_exit_velocity"] = hit_data.get("launchSpeed") if isinstance(hit_data, dict) else None
     
     return bvp_payload
