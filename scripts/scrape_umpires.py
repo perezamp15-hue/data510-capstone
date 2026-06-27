@@ -10,21 +10,27 @@ def run(target_date=None):
         local_tz = pytz.timezone('America/Los_Angeles')
         target_date = (datetime.now(local_tz) - timedelta(days=1)).strftime('%Y-%m-%d')
     
-    engine = get_engine()
-    try: 
-        valid_games = pd.read_sql("SELECT game_pk FROM games WHERE game_date = %s", con=engine, params=(target_date,))['game_pk'].tolist()
-    except Exception: 
+    print(f"Syncing game umpires directly from API schedule for: {target_date}")
+    
+    schedule_url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={target_date}"
+    try:
+        schedule_data = fetch_api_json(schedule_url)
+        dates_node = schedule_data.get('dates', [])
+        if not dates_node:
+            print(f"No scheduled matches found on API for date: {target_date}")
+            return
+        valid_games = [g.get('gamePk') for g in dates_node[0].get('games', []) if g.get('gamePk')]
+    except Exception as e:
+        print(f"Schedule pre-fetch failed: {e}")
         return
         
     all_umps = {}
     assignments = []
     
     for pk in valid_games:
-        # Hit the direct boxscore path rather than the live feed
         url = f"https://statsapi.mlb.com/api/v1/game/{pk}/boxscore"
         try:
             data = fetch_api_json(url)
-            # The official array lives directly under the root dictionary block here
             officials = data.get('officials', [])
             
             assign = {"game_pk": pk, "home_plate_ump_id": None, "first_base_ump_id": None, "second_base_ump_id": None, "third_base_ump_id": None}
@@ -47,10 +53,12 @@ def run(target_date=None):
         except Exception:
             continue
             
-    if not assignments: return
+    if not assignments: 
+        print("No umpire assignments found in target game payloads.")
+        return
     
+    engine = get_engine()
     with engine.begin() as conn:
-        # 1. Update master directory mapping table
         for u_id, u_name in all_umps.items():
             conn.execute(text("""
                 INSERT INTO umpires (umpire_id, umpire_name) 
@@ -58,7 +66,6 @@ def run(target_date=None):
                 ON CONFLICT (umpire_id) DO UPDATE SET umpire_name = EXCLUDED.umpire_name;
             """), {"u_id": u_id, "u_name": u_name})
             
-        # 2. Wire the game configurations together
         for assign in assignments:
             conn.execute(text("""
                 INSERT INTO game_umpires (game_pk, home_plate_ump_id, first_base_ump_id, second_base_ump_id, third_base_ump_id)
@@ -69,7 +76,7 @@ def run(target_date=None):
                     second_base_ump_id = EXCLUDED.second_base_ump_id, 
                     third_base_ump_id = EXCLUDED.third_base_ump_id;
             """), assign)
-    print(f"Umpire arrays mapped successfully for date: {target_date}")
+    print(f"Umpire tables successfully populated for {len(assignments)} games.")
 
 if __name__ == "__main__":
     run(sys.argv[1] if len(sys.argv) > 1 else None)
