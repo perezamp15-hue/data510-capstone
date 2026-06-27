@@ -1,6 +1,5 @@
 import pandas as pd
-import requests
-import cloudscraper
+from curl_cffi import requests
 from io import StringIO
 
 def fetch_team_defensive_quality(season: int = 2026):
@@ -16,7 +15,7 @@ def fetch_team_defensive_quality(season: int = 2026):
     
     defense_payload = {}
 
-    # Step 1: Gather Errors and Double Plays (Official MLB API - standard requests is fine)
+    # Step 1: Gather Errors and Double Plays (Official MLB API)
     res_mlb = requests.get(mlb_url)
     if res_mlb.status_code == 200:
         teams_list = res_mlb.json().get("stats", [{}])[0].get("splits", [])
@@ -34,10 +33,8 @@ def fetch_team_defensive_quality(season: int = 2026):
                 "defensive_runs_saved": None # Handled via structural estimation or projection mapping
             }
 
-    # Step 2: Hydrate with Outs Above Average (OAA) via Savant CSV Stream
-    # Create the Cloudflare-bypassing scraper specifically for Savant
-    scraper = cloudscraper.create_scraper()
-    res_savant = scraper.get(savant_url)
+    # Step 2: Hydrate with Outs Above Average (OAA) via Savant CSV Stream (Impersonating Chrome!)
+    res_savant = requests.get(savant_url, impersonate="chrome")
     
     if res_savant.status_code == 200:
         csv_data = StringIO(res_savant.text)
@@ -60,7 +57,7 @@ def fetch_team_defensive_quality(season: int = 2026):
                         break
         
         except pd.errors.ParserError:
-            print("Failed to parse Team Defense CSV. Baseball Savant may have blocked the request.")
+            print("⚠️ Failed to parse Team Defense CSV. Baseball Savant may have blocked the request.")
         except Exception as e:
             print(f"Skipping OAA parser hydration: {e}")
 
