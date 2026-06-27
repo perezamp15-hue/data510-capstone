@@ -7,7 +7,8 @@ def run(season=2026):
     print(f"Compiling framework calendar structures for {season}...")
     engine = get_engine()
     
-    url = f"https://statsapi.mlb.com/api/v1/schedule/games/?sportId=1&season={season}"
+    # Crucial Fix: Appended &hydrate=decisions so historical runs populate pitchers instantly
+    url = f"https://statsapi.mlb.com/api/v1/schedule/games/?sportId=1&season={season}&hydrate=decisions"
     try:
         schedule_data = fetch_api_json(url)
         dates_node = schedule_data.get('dates', [])
@@ -40,6 +41,7 @@ def run(season=2026):
                 "home_score": int(home_node.get('score')) if home_node.get('score') is not None else None,
                 "away_score": int(away_node.get('score')) if away_node.get('score') is not None else None,
                 "day_night_type": game.get('dayNight'),
+                "scheduled_start": game.get('gameDate'),
                 "winning_pitcher_id": int(decisions_node.get('winner', {}).get('id')) if decisions_node.get('winner') else None,
                 "losing_pitcher_id": int(decisions_node.get('loser', {}).get('id')) if decisions_node.get('loser') else None,
                 "save_pitcher_id": int(decisions_node.get('save', {}).get('id')) if decisions_node.get('save') else None
@@ -51,17 +53,18 @@ def run(season=2026):
                         INSERT INTO games (
                             game_pk, game_date, game_type, season, home_team_id, 
                             away_team_id, park_id, home_score, away_score, day_night_type,
-                            winning_pitcher_id, losing_pitcher_id, save_pitcher_id
+                            scheduled_start, winning_pitcher_id, losing_pitcher_id, save_pitcher_id
                         )
                         VALUES (
                             :game_pk, :game_date, :game_type, :season, :home_team_id, 
                             :away_team_id, :park_id, :home_score, :away_score, :day_night_type,
-                            :winning_pitcher_id, :losing_pitcher_id, :save_pitcher_id
+                            :scheduled_start, :winning_pitcher_id, :losing_pitcher_id, :save_pitcher_id
                         )
                         ON CONFLICT (game_pk) DO UPDATE SET
                             home_score = EXCLUDED.home_score,
                             away_score = EXCLUDED.away_score,
                             day_night_type = EXCLUDED.day_night_type,
+                            scheduled_start = EXCLUDED.scheduled_start,
                             winning_pitcher_id = EXCLUDED.winning_pitcher_id,
                             losing_pitcher_id = EXCLUDED.losing_pitcher_id,
                             save_pitcher_id = EXCLUDED.save_pitcher_id;
