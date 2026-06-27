@@ -1,6 +1,6 @@
 import requests
 
-def fetch_baserunning_metrics(season: int):
+def fetch_baserunning_metrics(player_id: int, season: int):
     """
     Scrapes baseline and advanced base running metrics for a player, 
     including tracking properties like sprint speed and extra bases taken.
