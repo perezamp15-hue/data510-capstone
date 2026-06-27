@@ -1,5 +1,5 @@
 import pandas as pd
-import cloudscraper
+from curl_cffi import requests
 from io import StringIO
 
 def fetch_catcher_framing_metrics(season: int = 2026):
@@ -15,11 +15,8 @@ def fetch_catcher_framing_metrics(season: int = 2026):
     
     catcher_map = {}
     
-    # Create the Cloudflare-bypassing scraper
-    scraper = cloudscraper.create_scraper()
-    
-    # Process Framing & Strike %
-    res_frame = scraper.get(framing_url)
+    # Process Framing & Strike % (Impersonating Chrome!)
+    res_frame = requests.get(framing_url, impersonate="chrome")
     if res_frame.status_code == 200:
         try:
             df_frame = pd.read_csv(StringIO(res_frame.text))
@@ -40,12 +37,12 @@ def fetch_catcher_framing_metrics(season: int = 2026):
                     "caught_stealing_pct": 0.0 
                 }
         except pd.errors.ParserError:
-            print("⚠️ Failed to parse Catcher Framing CSV. Baseball Savant may have blocked the request.")
+            print("Failed to parse Catcher Framing CSV. Baseball Savant may have blocked the request.")
         except Exception as e:
             print(f"Error parsing framing data: {e}")
             
-    # Process Pop Time & Caught Stealing %
-    res_pop = scraper.get(pop_url)
+    # Process Pop Time & Caught Stealing % (Impersonating Chrome!)
+    res_pop = requests.get(pop_url, impersonate="chrome")
     if res_pop.status_code == 200:
         try:
             df_pop = pd.read_csv(StringIO(res_pop.text))
@@ -68,7 +65,7 @@ def fetch_catcher_framing_metrics(season: int = 2026):
                         (cs / total_attempts) * 100 if total_attempts > 0 else 0.0
                     )
         except pd.errors.ParserError:
-            print("⚠️ Failed to parse Pop Time CSV. Baseball Savant may have blocked the request.")
+            print("Failed to parse Pop Time CSV. Baseball Savant may have blocked the request.")
         except Exception as e:
             print(f"Error parsing pop time CSV: {e}")
             
