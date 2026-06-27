@@ -21,15 +21,17 @@ def run(target_date=None):
 
     weather_count = 0
     for pk in valid_games:
-        url = f"https://statsapi.mlb.com/api/v1/game/{pk}/feed/live"
+        # Re-using the robust boxscore endpoint which contains gameData.weather information natively
+        url = f"https://statsapi.mlb.com/api/v1/game/{pk}/boxscore"
         try:
             data = fetch_api_json(url)
+            # Weather details are nested under gameData in the boxscore structure
             info = data.get('gameData', {}).get('weather', {})
             temp_str = info.get('temp')
+            
             if not temp_str: 
                 continue
                 
-            # Cleanly split text values like "10 mph, Out To LF" if necessary
             raw_wind = info.get('wind', '0')
             wind_speed = "".join(filter(str.isdigit, str(raw_wind)))
             wind_speed_int = int(wind_speed) if wind_speed else 0
