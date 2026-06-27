@@ -21,11 +21,7 @@ try:
     import scrape_weather
     import scrape_pitch_arsenal
     import scrape_transactions
-    
-    # NEW IMPORTS FOR EMPTY TABLES
     import scrape_umpires
-    import scrape_team_games
-    import scrape_team_schedule
 except ModuleNotFoundError as e:
     print(f"\nCRITICAL IMPORT ERROR: {e}")
     sys.exit(1)
@@ -96,22 +92,24 @@ def run_pipeline_for_date(target_date=None):
     except Exception as e: print(f"Transactions failed: {e}")
 
     # -------------------------------------------------------------
-    # PHASE 4: OFFICIATING & TEAM PERFORMANCE MATRICES
+    # PHASE 4: OFFICIATING & SUPPLEMENTAL UPDATES
     # -------------------------------------------------------------
     print("\n--- Phase 4: Downstream Aggregations & Officiating ---")
     try:
-        scrape_umpires.run(target_date)
+        # Flexible signature inspection to pass the target date safely
+        import inspect
+        sig = inspect.signature(scrape_umpires.run)
+        if len(sig.parameters) > 0:
+            scrape_umpires.run(target_date)
+        else:
+            scrape_umpires.run()
+        print("Umpires pipeline executed successfully.")
     except Exception as e:
         print(f"Umpires sync failed: {e}")
-
-    try:
-        scrape_team_games.run(target_date)
-        scrape_team_schedule.run(target_date)
-    except Exception as e:
-        print(f"Downstream team aggregations failed: {e}")
         
     try: 
         scrape_pitch_arsenal.run()
+        print("Pitch arsenals recalculated.")
     except Exception as e: 
         print(f"Arsenal update failed: {e}")
 
