@@ -1,19 +1,17 @@
 import pandas as pd
-import cloudscraper
+from curl_cffi import requests # <-- Import this instead of standard requests or cloudscraper
 from io import StringIO
 
 def fetch_statcast_park_factors(season: int = 2026):
     """
     Scrapes the official Statcast Park Factors directly from Baseball Savant.
-    Returns a dictionary of stadiums mapped to their component multipliers.
     """
     url = f"https://baseballsavant.mlb.com/leaderboard/statcast-park-factors?type=year&year={season}&stat=index_woba&condition=All&rolling=no&csv=true"
     
     park_factors = {}
     
-    # Create the Cloudflare-bypassing scraper
-    scraper = cloudscraper.create_scraper() 
-    response = scraper.get(url)
+    # MAGIC FIX: Impersonate a real Chrome browser's network signature!
+    response = requests.get(url, impersonate="chrome")
     
     if response.status_code != 200:
         print(f"Error fetching Park Factors for season {season}. Status: {response.status_code}")
