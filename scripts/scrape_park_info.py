@@ -32,16 +32,15 @@ def run():
         lat = loc.get('latitude')
         lon = loc.get('longitude')
         
-        # Field structural attributes
+        # Field structural attributes (Fixed API mapping keys)
         field = v.get('fieldInfo', {})
-        surface = field.get('roofType', 'Grass')  # Fallback
+        surface = field.get('surface', 'Grass')  
         roof = field.get('roofType', 'Open')
         
         if not lat or not lon:
-            # Skip spring training/minor league fields missing geographic footprints
+            # Skip fields without geographic coordinates
             continue
 
-        # Convert measurements safely
         latitude = float(lat)
         longitude = float(lon)
 
@@ -55,7 +54,6 @@ def run():
                 # Convert meters to feet for typical baseball park standards
                 elevation_meters = int(results[0].get('elevation', 0) * 3.28084)
         except Exception:
-            # Fallback to sea level if external geo-lookup experiences timeouts
             elevation_meters = 0
 
         processed_parks.append({
