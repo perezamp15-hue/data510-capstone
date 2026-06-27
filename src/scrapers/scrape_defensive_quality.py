@@ -2,7 +2,7 @@ import pandas as pd
 from curl_cffi import requests
 from io import StringIO
 
-def fetch_team_defensive_quality(season: int = 2026):
+def fetch_defensive_quality(season: int):
     """
     Scrapes traditional team defensive metrics (Errors, Double Plays)
     and modern tracking-era indicators (OAA) from Baseball Savant.
