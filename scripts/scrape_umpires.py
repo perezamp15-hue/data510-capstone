@@ -10,18 +10,19 @@ def run(target_date=None):
         local_tz = pytz.timezone('America/Los_Angeles')
         target_date = (datetime.now(local_tz) - timedelta(days=1)).strftime('%Y-%m-%d')
     
-    print(f"Syncing game umpires directly from API schedule for: {target_date}")
+    print(f"Syncing game umpires directly via API Schedule for window: {target_date}")
     
+    # FIX: Fetch schedule IDs directly from the API to bypass database timestamp format issues
     schedule_url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={target_date}"
     try:
         schedule_data = fetch_api_json(schedule_url)
         dates_node = schedule_data.get('dates', [])
         if not dates_node:
-            print(f"No scheduled matches found on API for date: {target_date}")
+            print(f"No games found on schedule for date: {target_date}")
             return
         valid_games = [g.get('gamePk') for g in dates_node[0].get('games', []) if g.get('gamePk')]
     except Exception as e:
-        print(f"Schedule pre-fetch failed: {e}")
+        print(f"Schedule extraction failed: {e}")
         return
         
     all_umps = {}
@@ -54,7 +55,7 @@ def run(target_date=None):
             continue
             
     if not assignments: 
-        print("No umpire assignments found in target game payloads.")
+        print("No official umpire configurations found inside game boxscores.")
         return
     
     engine = get_engine()
@@ -76,7 +77,7 @@ def run(target_date=None):
                     second_base_ump_id = EXCLUDED.second_base_ump_id, 
                     third_base_ump_id = EXCLUDED.third_base_ump_id;
             """), assign)
-    print(f"Umpire tables successfully populated for {len(assignments)} games.")
+    print(f"Umpire assignments successfully written for {len(assignments)} games.")
 
 if __name__ == "__main__":
     run(sys.argv[1] if len(sys.argv) > 1 else None)
