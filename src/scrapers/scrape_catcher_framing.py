@@ -14,6 +14,8 @@ def fetch_catcher_framing_metrics(season: int = 2026):
     pop_url = f"https://baseballsavant.mlb.com/leaderboard/poptime?year={season}&team=&min_throws=0&csv=true"
     
     catcher_map = {}
+
+    scraper = cloudscraper.create_scraper()
     
     # Process Framing & Strike %
     res_frame = requests.get(framing_url, headers=headers)
