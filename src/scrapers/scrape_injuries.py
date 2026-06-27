@@ -1,6 +1,6 @@
 import requests
 
-def fetch_detailed_injury_reports(sport_id: int = 1):
+def fetch_injury_reports():
     """
     Scrapes full medical status summaries, transaction injury trackers, 
     and detailed day-to-day notes across the league.
