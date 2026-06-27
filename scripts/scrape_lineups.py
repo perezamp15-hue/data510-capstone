@@ -1,6 +1,6 @@
 import pandas as pd
 from sqlalchemy.exc import IntegrityError
-from db_client import get_engine
+from db_client import get_engine, fetch_api_json
 
 def save_lineups_to_db(lineups_df):
     if lineups_df is None or lineups_df.empty:
