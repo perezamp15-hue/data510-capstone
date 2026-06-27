@@ -1,65 +1,51 @@
 import sys
-import pandas as pd
-from datetime import datetime, timedelta
-import pytz
 from db_client import get_engine, fetch_api_json
 from sqlalchemy import text
 
-def run(target_date=None):
-    if not target_date:
-        local_tz = pytz.timezone('America/Los_Angeles')
-        target_date = (datetime.now(local_tz) - timedelta(days=1)).strftime('%Y-%m-%d')
-    
-    print(f"Running weather ingest for: {target_date}")
+def run(target_date):
+    print(f"Syncing game officials and umpires matrix for: {target_date}")
     engine = get_engine()
     
-    try: 
-        valid_games = pd.read_sql("SELECT game_pk FROM games WHERE game_date = %s", con=engine, params=(target_date,))['game_pk'].tolist()
-    except Exception as e: 
-        print(f"Failed to query games for weather update: {e}")
+    # 1. Fetch all games for that date from our internal database
+    with engine.connect() as conn:
+        result = conn.execute(text("SELECT game_pk FROM games WHERE game_date = :date"), {"date": target_date})
+        game_pks = [row[0] for row in result.fetchall()]
+        
+    if not game_pks:
+        print("No games found in database for this date window.")
         return
 
-    weather_count = 0
-    for pk in valid_games:
-        # Re-using the reliable boxscore endpoint which contains gameData.weather
-        url = f"https://statsapi.mlb.com/api/v1/game/{pk}/boxscore"
+    print(f"Processing boxscore officials arrays for {len(game_pks)} games...")
+    
+    for pk in game_pks:
+        boxscore_url = f"https://statsapi.mlb.com/api/v1/game/{pk}/boxscore"
         try:
-            data = fetch_api_json(url)
-            # The API matches the structural format of feed/live inside the boxscore gameData node
-            info = data.get('gameData', {}).get('weather', {})
-            temp_str = info.get('temp')
+            box_data = fetch_api_json(boxscore_url)
+            officials = box_data.get('officials', [])
             
-            if not temp_str: 
-                continue
-                
-            raw_wind = info.get('wind', '0')
-            wind_speed = "".join(filter(str.isdigit, str(raw_wind)))
-            wind_speed_int = int(wind_speed) if wind_speed else 0
-
-            w_dict = {
-                "game_pk": int(pk), 
-                "temperature_f": int(temp_str), 
-                "sky_condition": info.get('condition'), 
-                "wind_speed_mph": wind_speed_int, 
-                "wind_direction": info.get('direction')
-            }
-            
-            with engine.begin() as conn:
-                conn.execute(text("""
-                    INSERT INTO game_weather (game_pk, temperature_f, sky_condition, wind_speed_mph, wind_direction)
-                    VALUES (:game_pk, :temperature_f, :sky_condition, :wind_speed_mph, :wind_direction)
-                    ON CONFLICT (game_pk) DO UPDATE SET 
-                        temperature_f = EXCLUDED.temperature_f, 
-                        sky_condition = EXCLUDED.sky_condition,
-                        wind_speed_mph = EXCLUDED.wind_speed_mph,
-                        wind_direction = EXCLUDED.wind_direction;
-                """), w_dict)
-            weather_count += 1
-        except Exception as e: 
-            print(f" Weather error for game {pk}: {e}")
+            with engine.begin() as txn_conn:
+                for off in officials:
+                    official_info = off.get('official', {})
+                    umpire_id = int(official_info.get('id'))
+                    umpire_name = official_info.get('fullName')
+                    position = off.get('officialType') # Home Plate, First Base, etc.
+                    
+                    # Ensure the master umpire row registry exists
+                    txn_conn.execute(text("""
+                        INSERT INTO umpires (umpire_id, umpire_name)
+                        VALUES (:ump_id, :name)
+                        ON CONFLICT (umpire_id) DO UPDATE SET umpire_name = EXCLUDED.umpire_name;
+                    """), {"ump_id": umpire_id, "name": umpire_name})
+                    
+                    # Note: If your schema uses an umpire_assignments linkage table, map it here.
+                    # Otherwise, this populates your base umpire table safely.
+                    
+        except Exception as e:
+            print(f"Skipping game {pk} due to boxscore lookup error: {e}")
             continue
-
-    print(f"Weather updates completed: Ingested {weather_count} records.")
+            
+    print("Umpires lookup verification completed.")
 
 if __name__ == "__main__":
-    run(sys.argv[1] if len(sys.argv) > 1 else None)
+    date_arg = sys.argv[1] if len(sys.argv) > 1 else "2026-06-22"
+    run(date_arg)
