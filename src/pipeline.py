@@ -38,7 +38,7 @@ from src.scrapers.scrape_baserunning import fetch_baserunning_metrics
 
 # Splits & Lineups
 from src.scrapers.scrape_batter_splits import fetch_batter_splits       # Matching your typo file name
-from src.scrapers.scraper_player_splits import fetch_generic_player_splits
+from src.scrapers.scraper_player_splits import fetch_player_splits
 from src.scrapers.scrape_pitcher_platoon_splits import fetch_pitcher_platoon_splits
 from src.scrapers.scrape_pitcher_season import fetch_pitcher_season_stats
 from src.scrapers.scrape_batter_statcast import fetch_batter_statcast
