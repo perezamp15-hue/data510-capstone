@@ -2,12 +2,12 @@ import sys
 import os
 from datetime import datetime, timedelta
 
-# Dynamically append scripts directory to global search paths
+# Force Python to treat the scripts directory as a core lookup folder
 scripts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'scripts')
 if scripts_dir not in sys.path:
     sys.path.insert(0, scripts_dir)
 
-# Clean imports matching your folder exactly!
+# Clean, direct module imports
 import scrape_statcast
 import scrape_game_feed
 import scrape_lineups
@@ -22,7 +22,7 @@ import scrape_schedule
 
 def run_pipeline_for_date(target_date):
     print(f"\n=========================================")
-    print(f"STARTING MLB PIPELINE FOR: {target_date}")
+    print(f"RUNNING MLB DATA STREAM FOR: {target_date}")
     print(f"=========================================\n")
     
     print("--- Running Base Infrastructure Updates ---")
@@ -65,11 +65,22 @@ def run_pipeline_for_date(target_date):
     try: scrape_pitch_arsenal.run()
     except Exception as e: print(f"Error updating pitch arsenals: {e}")
 
-    print(f"\nPipeline successfully completed for {target_date}!")
+    print(f"\nCompleted execution block for {target_date}!")
 
 if __name__ == '__main__':
+    # Determine the date scopes dynamically
+    today_str = datetime.now().strftime('%Y-%m-%d')
+    yesterday_str = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+    
     if len(sys.argv) > 1:
+        # If a manual argument is given, run just that date
         run_pipeline_for_date(sys.argv[1])
     else:
-        yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
-        run_pipeline_for_date(yesterday)
+        print(f"Kicking off multi-day automated rolling window loop...")
+        # 1. Run yesterday first to capture late/finalized box scores
+        run_pipeline_for_date(yesterday_str)
+        # 2. Run today to capture live/early schedules and lineups
+        run_pipeline_for_date(today_str)
+        print("\n=========================================")
+        print("ALL TARGETED ROLLING DATES SYNCED PERFECTLY!")
+        print("=========================================\n")
