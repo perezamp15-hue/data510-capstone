@@ -21,8 +21,8 @@ def run(target_date=None):
 
     weather_count = 0
     for pk in valid_games:
-        # Use the official live data endpoint path which holds the true gameData context framework
-        url = f"https://statsapi.mlb.com/api/v1/game/{pk}/feed/live"
+        # Crucial Fix: MLB live data feed requires the v1.1 endpoint path
+        url = f"https://statsapi.mlb.com/api/v1.1/game/{pk}/feed/live"
         try:
             data = fetch_api_json(url)
             if not data:
@@ -31,7 +31,6 @@ def run(target_date=None):
             info = data.get('gameData', {}).get('weather', {})
             temp_str = info.get('temp')
             
-            # If weather isn't tracked or recorded yet for this game ID, skip it safely
             if not temp_str: 
                 continue
                 
@@ -58,8 +57,8 @@ def run(target_date=None):
                         wind_direction = EXCLUDED.wind_direction;
                 """), w_dict)
             weather_count += 1
-        except Exception:
-            # Silently pass over single game network or processing blips
+        except Exception as e:
+            # Safely skip individual unmatched records without stopping the pipeline
             continue
 
     print(f"Weather updates completed: Ingested {weather_count} records.")
