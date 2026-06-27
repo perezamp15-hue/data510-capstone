@@ -1,36 +1,77 @@
-import sys
-from datetime import datetime, timedelta
 import pandas as pd
-from scripts.db_client import get_engine, fetch_api_json
+from sqlalchemy.exc import IntegrityError
+from db_client import get_engine, fetch_api_json
 
-def run(date_str=None):
-    if not date_str:
-        date_str = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+def extract_umpires_for_game(game_pk):
+    """
+    Queries the live game boxscore to pull the assigned official crew.
+    """
+    url = f"https://statsapi.mlb.com/api/v1/game/{game_pk}/feed/live"
+    try:
+        data = fetch_api_json(url)
+        live_data = data.get('liveData', {})
+        boxscore = live_data.get('boxscore', {})
+        officials = boxscore.get('officials', [])
         
-    sched_url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={date_str}"
-    sched_data = fetch_api_json(sched_url)
-    
-    umpire_records = []
-    for date_obj in sched_data.get("dates", []):
-        for g in date_obj.get("games", []):
-            game_pk = g.get("gamePk")
-            box_url = f"https://statsapi.mlb.com/api/v1/game/{game_pk}/boxscore"
-            try:
-                box_data = fetch_api_json(box_url)
-                officials = box_data.get("officials", [])
-                ump_dict = {"game_pk": game_pk, "hp_umpire": None, "ump_1b": None, "ump_2b": None, "ump_3b": None}
-                
-                for off in officials:
-                    role = off.get("officialType")
-                    name = off.get("official", {}).get("fullName")
-                    if role == "Home Plate": ump_dict["hp_umpire"] = name
-                    elif role == "First Base": ump_dict["ump_1b"] = name
-                    elif role == "Second Base": ump_dict["ump_2b"] = name
-                    elif role == "Third Base": ump_dict["ump_3b"] = name
-                    
-                umpire_records.append(ump_dict)
-            except Exception as e:
-                print(f"Umpire extraction issue on {game_pk}: {e}")
+        ump_record = {
+            "game_pk": game_pk,
+            "hp_umpire": None,
+            "ump_1b": None,
+            "ump_2b": None,
+            "ump_3b": None
+        }
+        
+        for official in officials:
+            position = official.get('officialType')
+            name = official.get('official', {}).get('fullName')
+            if position == 'Home Plate': ump_record['hp_umpire'] = name
+            elif position == 'First Base': ump_record['ump_1b'] = name
+            elif position == 'Second Base': ump_record['ump_2b'] = name
+            elif position == 'Third Base': ump_record['ump_3b'] = name
+            
+        return ump_record
+    except Exception as e:
+        print(f"No umpire context loaded for {game_pk}: {e}")
+        return None
 
-    if umpire_records:
-        pd.DataFrame(umpire_records).to_sql('game_umpires', get_engine(), if_exists='append', index=False)
+def run(target_date):
+    print(f"Gathering umpire official profiles for {target_date}...")
+    engine = get_engine()
+    
+    try:
+        games_df = pd.read_sql(f"SELECT game_pk FROM games WHERE game_date = '{target_date}'", con=engine)
+        game_pks = games_df['game_pk'].tolist()
+    except Exception as e:
+        print(f"Could not read games list from database: {e}")
+        return
+
+    umpire_records = []
+    for pk in game_pks:
+        record = extract_umpires_for_game(pk)
+        if record:
+            umpire_records.append(record)
+            
+    if not umpire_records:
+        print(f"No umpire profiles compiled for {target_date}.")
+        return
+
+    umpires_df = pd.DataFrame(umpire_records)
+    
+    # Database Insertion with Relational Integrity Filtering
+    try:
+        umpires_df.to_sql("game_umpires", con=engine, if_exists="append", index=False)
+        print(f"Umpire assignments saved successfully for {len(umpires_df)} matchups.")
+    except IntegrityError:
+        print("Foreign key constraint flagged. Aligning umpire rows against saved parent IDs...")
+        
+        # Verify valid parent records in the data layer
+        valid_games = pd.read_sql("SELECT game_pk FROM games", con=engine)['game_pk'].tolist()
+        
+        # Filter down rows to guaranteed parent matches
+        safe_df = umpires_df[umpires_df['game_pk'].isin(valid_games)]
+        
+        if not safe_df.empty:
+            safe_df.to_sql("game_umpires", con=engine, if_exists="append", index=False)
+            print(f"Successfully processed {len(safe_df)} clean umpire lists.")
+        else:
+            print("Umpire synchronization skipped: Matching parent game missing from database.")
