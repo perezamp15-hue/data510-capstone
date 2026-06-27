@@ -1,25 +1,45 @@
 import sys
 import os
 
-# 1. MOVED TO THE ABSOLUTE TOP: Inject scripts directory into Python's path list
-scripts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'scripts')
-if scripts_dir not in sys.path:
-    sys.path.insert(0, scripts_dir)
+# 1. Calculate relative path based on file location
+base_dir = os.path.dirname(os.path.abspath(__file__))
+scripts_dir = os.path.join(base_dir, 'scripts')
 
-# 2. Now Python can safely look inside /app/scripts/ to resolve these modules
-import scrape_teams
-import scrape_park_info
-import scrape_rosters
-import scrape_schedule
-import scrape_game_feed
-import scrape_statcast
-import scrape_lineups
-import scrape_defense
-import scrape_bullpen
-import scrape_weather
-import scrape_umpires
-import scrape_pitch_arsenal
-import scrape_transactions
+# 2. Hardcoded fallback for standard Docker configurations
+docker_scripts_dir = "/app/scripts"
+
+# Inject paths into Python lookup matrix
+for path in [scripts_dir, docker_scripts_dir, base_dir]:
+    if os.path.exists(path) and path not in sys.path:
+        sys.path.insert(0, path)
+
+# 3. DIAGNOSTIC LOGGING: If it still fails, this will show you why
+print("--- Docker Container Path Debugger ---")
+print(f"Current Working Directory: {os.getcwd()}")
+print(f"Calculated Scripts Dir:    {scripts_dir} (Exists: {os.path.exists(scripts_dir)})")
+print(f"Docker Scripts Dir:        {docker_scripts_dir} (Exists: {os.path.exists(docker_scripts_dir)})")
+print(f"Files inside /app:         {os.listdir('/app') if os.path.exists('/app') else 'Folder /app not found'}")
+print("--------------------------------------")
+
+# Line 23: Now we attempt the imports with all fallback paths secured
+try:
+    import scrape_teams
+    import scrape_park_info
+    import scrape_rosters
+    import scrape_schedule
+    import scrape_game_feed
+    import scrape_statcast
+    import scrape_lineups
+    import scrape_defense
+    import scrape_bullpen
+    import scrape_weather
+    import scrape_umpires
+    import scrape_pitch_arsenal
+    import scrape_transactions
+except ModuleNotFoundError as e:
+    print(f"\nCRITICAL IMPORT ERROR: {e}")
+    print("Your scripts folder might be missing from the container or named incorrectly.")
+    sys.exit(1)
 
 from datetime import datetime, timedelta
 import pytz
@@ -42,7 +62,6 @@ def run_pipeline_for_date(target_date=None):
     try: scrape_rosters.run(season=2026)
     except Exception as e: print(f"Roster sync failed: {e}")
 
-    # --- SWAPPED: game_feed runs BEFORE schedule to ensure valid game_pks exist ---
     try: scrape_game_feed.run(target_date)
     except Exception as e:
         print(f"CRITICAL: Main Feed failed for {target_date}: {e}")
@@ -50,7 +69,6 @@ def run_pipeline_for_date(target_date=None):
 
     try: scrape_schedule.run(season=2026)
     except Exception as e: print(f"Schedule sync failed: {e}")
-    # ------------------------------------------------------------------------------
 
     try: scrape_statcast.run(target_date, target_date)
     except Exception as e: print(f"Statcast failed: {e}")
