@@ -52,7 +52,6 @@ def run(start_date=None, end_date=None):
 
         # Ensure unique pitch identifiers exist 
         if 'pitch_id' not in df.columns or df['pitch_id'].isnull().all():
-            # Generate a distinct composite identifier if Savant's explicit tracking row is unpopulated
             df['pitch_id'] = df['game_pk'].astype(str) + "_" + df['pitcher'].astype(str) + "_" + df['batter'].astype(str) + "_" + df['pitch_number'].astype(str)
 
         pitches_inserted = 0
@@ -62,7 +61,6 @@ def run(start_date=None, end_date=None):
         print("Writing data stream to statcast_pitches...")
         with engine.begin() as conn:
             for _, row in df.iterrows():
-                # Modify column lookups here if your statcast_pitches table uses distinct naming
                 pitch_data = {
                     "pitch_id": row.get("pitch_id"),
                     "game_pk": int(row.get("game_pk")),
@@ -91,17 +89,16 @@ def run(start_date=None, end_date=None):
 
         # --- LOOP 2: POPULATE CONTACT OUTCOMES (statcast_batted_balls) ---
         print("Filtering contact tracking elements for statcast_batted_balls...")
-        # Only parse entries where a ball was hit into play with valid launch parameters
         batted_df = df[df['launch_speed'].notnull() | df['launch_angle'].notnull()]
 
         with engine.begin() as conn:
             for _, row in batted_df.iterrows():
                 batted_data = {
                     "pitch_id": row.get("pitch_id"),
-                    "exit_velocity": row.get("launch_speed"),       -- Savant calls exit velocity 'launch_speed'
+                    "exit_velocity": row.get("launch_speed"),       # Fixed Python comment syntax
                     "launch_angle": row.get("launch_angle"),
                     "hit_distance_feet": int(row.get("hit_distance_sc")) if row.get("hit_distance_sc") else None,
-                    "spray_angle": row.get("hc_x"),                  -- Mapping coordinate fields to match table design
+                    "spray_angle": row.get("hc_x"),                  # Fixed Python comment syntax
                     "hit_location_x": row.get("hc_y")
                 }
                 
