@@ -46,8 +46,14 @@ def run(season=2026):
                 conn.execute(text("""
                     INSERT INTO players (player_id, full_name, current_team_id, position_code, bats, throws, birth_date, height, weight, mlb_debut, is_active)
                     VALUES (:player_id, :full_name, :current_team_id, :position_code, :bats, :throws, :birth_date, :height, :weight, :mlb_debut, :is_active)
-                    ON CONFLICT (player_id) DO UPDATE SET full_name = EXCLUDED.full_name, current_team_id = EXCLUDED.current_team_id, position_code = EXCLUDED.position_code, bats = EXCLUDED.bats, throws = EXCLUDED.throws, birth_date = EXCLUDED.birth_date, height = EXCLUDED.height, weight = EXCLUDED.weight, mlb_debut = EXCLUDED.mlb_debut, is_active = EXCLUDED.is_active;
-                """), row.to_dict())
+                    ON CONFLICT (player_id) DO UPDATE SET 
+                        full_name = EXCLUDED.full_name, 
+                        current_team_id = EXCLUDED.current_team_id,  # <-- This updates their team on your database instantly
+                        position_code = EXCLUDED.position_code, 
+                        bats = EXCLUDED.bats, 
+                        throws = EXCLUDED.throws, 
+                        is_active = EXCLUDED.is_active;
+                    """), row.to_dict())
                 
         print(f"Roster update completed successfully for {len(df)} players.")
     except Exception as e: 
