@@ -43,14 +43,14 @@ def run(target_date):
         game_type = g.get('gameType', 'R') 
         api_venue_id = g.get('venue', {}).get('id')
         
-        # --- PARK ID TRANSLATION LAYER ---
+        # --- PARK VERIFICATION LAYER ---
         local_park_id = None
         if api_venue_id:
             try:
                 with engine.connect() as conn:
-                    # Query fixed to select park_id to match your schema
+                    # Check if the park_id exists in your parks master table
                     park_lookup = conn.execute(text("""
-                        SELECT park_id FROM parks WHERE mlb_venue_id = :api_id LIMIT 1
+                        SELECT park_id FROM parks WHERE park_id = :api_id LIMIT 1
                     """), {"api_id": int(api_venue_id)}).fetchone()
                     
                     if park_lookup:
@@ -58,7 +58,7 @@ def run(target_date):
                     else:
                         local_park_id = int(api_venue_id)
             except Exception as lookup_err:
-                print(f"Park translation warning for Venue {api_venue_id}: {lookup_err}")
+                print(f"Park verification warning for Venue {api_venue_id}: {lookup_err}")
                 local_park_id = int(api_venue_id)
         # ---------------------------------
 
@@ -159,7 +159,7 @@ def run(target_date):
         except Exception as db_err:
             print(f"Database write failure for Game {game_pk}: {db_err}")
 
-    print(f"Game Feed Complete: Successfully saved {inserted_games} games with proper park translations.")
+    print(f"Game Feed Complete: Successfully saved {inserted_games} games using direct park mappings.")
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
