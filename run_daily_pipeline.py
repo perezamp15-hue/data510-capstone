@@ -1,5 +1,6 @@
 import sys
 import os
+import subprocess
 
 base_dir = os.path.dirname(os.path.abspath(__file__))
 scripts_dir = os.path.join(base_dir, 'scripts')
@@ -12,14 +13,9 @@ for path in [scripts_dir, docker_scripts_dir, base_dir]:
 print("--- Docker Container Path Debugger ---")
 print(f"Current Working Directory: {os.getcwd()}")
 print(f"Calculated Scripts Dir:    {scripts_dir} (Exists: {os.path.exists(scripts_dir)})")
-print(f"Files inside /app/scripts: {os.listdir(docker_scripts_dir) if os.path.exists(docker_scripts_dir) else 'Folder not found'}")
 print("--------------------------------------")
 
 try:
-    import scrape_teams
-    import scrape_park_info
-    import scrape_rosters
-    import scrape_schedule
     import scrape_game_feed
     import scrape_statcast
     import scrape_lineups
@@ -29,7 +25,7 @@ try:
     import scrape_umpires
     import scrape_pitch_arsenal
     import scrape_transactions
-    from db_client import get_engine  # Needed to verify data states
+    from db_client import get_engine 
     from sqlalchemy import text
 except ModuleNotFoundError as e:
     print(f"\nCRITICAL IMPORT ERROR: {e}")
@@ -38,8 +34,26 @@ except ModuleNotFoundError as e:
 from datetime import datetime, timedelta
 import pytz
 
-def check_and_seed_database(season=2026):
-    """Checks if foundational tables are empty and automatically self-seeds if true."""
+def force_shell_seed(script_name, *args):
+    """Executes a script as a separate shell subprocess to avoid argument/import conflicts."""
+    script_path = os.path.join(scripts_dir, script_name)
+    if not os.path.exists(script_path):
+        # Fallback for flat directories
+        script_path = os.path.join(base_dir, script_name)
+        
+    cmd = [sys.executable, script_path] + list(args)
+    print(f"🤖 Executing: {' '.join(cmd)}")
+    
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        print(result.stdout)
+    except subprocess.CalledProcessError as e:
+        print(f"Subprocess failed for {script_name}!")
+        print(f"STDOUT:\n{e.stdout}")
+        print(f"STDERR:\n{e.stderr}")
+
+def check_and_seed_database():
+    """Checks if foundational tables are empty and automatically self-seeds using clean shell processes."""
     print("\n--- Pre-Flight Constraint Validation ---")
     engine = get_engine()
     
@@ -50,63 +64,38 @@ def check_and_seed_database(season=2026):
             game_count = conn.execute(text("SELECT COUNT(*) FROM public.games;")).scalar()
             
         if team_count == 0 or park_count == 0 or game_count == 0:
-            print("Empty database ecosystem detected! Initiating automated structural recovery sequence...")
+            print("Empty database ecosystem detected! Initiating shell-isolated recovery sequence...")
             
-            print("System-Seed Step 1/4: Ingesting professional baseball team identities...")
-            scrape_teams.run()
+            print("\n[Step 1/4] Seeding Team Identities...")
+            force_shell_seed("scrape_teams.py")
             
-            print("System-Seed Step 2/4: Populating major league venue dimensions and parks...")
-            scrape_park_info.run()
+            print("\n[Step 2/4] Seeding Venues & Parks...")
+            force_shell_seed("scrape_park_info.py")
             
-            print("System-Seed Step 3/4: Creating master seasonal schedule structural framework...")
-            scrape_schedule.run(season=season)
+            print("\n[Step 3/4] Seeding 2026 Master Framework...")
+            force_shell_seed("scrape_schedule.py", "2026")
             
-            print("System-Seed Step 4/4: Constructing initial active structural player rosters...")
-            scrape_rosters.run(season=season)
+            print("\n[Step 4/4] Seeding Initial Player Rosters...")
+            force_shell_seed("scrape_rosters.py")
             
-            print("Structural database verification complete. All lookups and dimensions are intact.")
+            print("\nStructural database verification complete. All lookups and dimensions are intact.")
         else:
-            print(f"Foundation verified (Teams: {team_count}, Parks: {park_count}, Master Framework Games: {game_count}). Processing incremental ingestion normally.")
+            print(f"Foundation verified (Teams: {team_count}, Parks: {park_count}, Master Framework Games: {game_count}). Ingesting daily logs normally.")
             
     except Exception as e:
-        print(f"Pre-flight safety execution bypassed due to warning: {e}. Attempting direct processing...")
+        print(f"Pre-flight safety execution bypassed due to validation error: {e}")
 
 def run_pipeline_for_date(target_date=None):
     if not target_date:
         local_tz = pytz.timezone('America/Los_Angeles')
-        # Defaults to 5 days ago for clean historical backfill windows
         target_date = (datetime.now(local_tz) - timedelta(days=5)).strftime('%Y-%m-%d')
         
     print(f"\n=========================================")
     print(f"RUNNING CRON-READY PIPELINE FOR: {target_date}")
     print(f"=========================================\n")
     
-    # Run the self-healing layout check first
-    check_and_seed_database(season=2026)
-
-    # -------------------------------------------------------------
-    # PHASE 1: CORE INDEXES & CONSTRAINTS
-    # -------------------------------------------------------------
-    print("\n--- Phase 1: Syncing Core Indices ---")
-    try: 
-        scrape_teams.run()
-    except Exception as e: 
-        print(f"Teams sync failed: {e}")
-        
-    try: 
-        scrape_park_info.run()
-    except Exception as e: 
-        print(f"Parks sync failed: {e}")
-
-    try: 
-        scrape_schedule.run(season=2026)
-    except Exception as e: 
-        print(f"Schedule sync failed: {e}")
-        
-    try: 
-        scrape_rosters.run(season=2026)
-    except Exception as e: 
-        print(f"Roster sync failed: {e}")
+    # Trigger the robust database verification check
+    check_and_seed_database()
 
     # -------------------------------------------------------------
     # PHASE 2: PRIMARY EVENT INGESTION
