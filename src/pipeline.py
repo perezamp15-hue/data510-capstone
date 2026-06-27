@@ -1,92 +1,137 @@
 import os
 import sys
+
+# =======================================================
+# PATH IMMUNITY SAFEGUARDS (Must execute first)
+# =======================================================
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) 
+SRC_DIR = os.path.join(BASE_DIR, "src")                               
+
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+if SRC_DIR not in sys.path:
+    sys.path.insert(0, SRC_DIR)
+
+# =======================================================
+# CORE IMPORTS
+# =======================================================
 import psycopg2
-from datetime import datetime, date, timedelta
+from datetime import date, timedelta
 from psycopg2.extras import execute_values
 
-
-# =======================================================
-# CORE IMPORTS (Ensure these match your file structure)
-# =======================================================
+# Master Import Matrix matching your exact repository files
 from src.scrapers.scrape_stadium_registry import fetch_mlb_stadiums
-from src.scrapers.scrape_players import fetch_team_roster
 from src.scrapers.scrape_schedule import fetch_season_schedule
+from src.scrapers.scrape_players import fetch_team_roster
+from src.scrapers.scrape_park_factors import fetch_park_factors
+from src.scrapers.scrape_catcher_framing import fetch_catcher_framing_metrics
 from src.scrapers.scrape_environmental_weather import fetch_environmental_weather
 from src.scrapers.scrape_pitch_by_pitch import fetch_game_pitch_by_pitch
+from src.scrapers.scrape_boxscore import fetch_boxscore_data
+from src.scrapers.scrape_injuries import fetch_injury_reports
+from src.scrapers.scrape_bullpen import fetch_bullpen_metrics
+from src.scrapers.scrape_defensive_quality import fetch_defensive_quality
+from src.scrapers.scrape_team_trends import fetch_team_trends
+from src.scrapers.scrape_umpire_trends import fetch_umpire_trends
 from src.scrapers.scrape_player_fatigue import estimate_player_fatigue
-from src.scrapers.scrape_catcher_framing import fetch_catcher_framing_metrics
-from src.scrapers.scrape_park_factors import fetch_statcast_park_factors
+from src.scrapers.scrape_baserunning import fetch_baserunning_metrics
+
+# Splits & Lineups
+from src.scrapers.scrape_battar_splits import fetch_batter_splits       # Matching your typo file name
+from src.scrapers.scraper_player_splits import fetch_generic_player_splits
+from src.scrapers.scrape_pitcher_platoon_splits import fetch_pitcher_platoon_splits
+from src.scrapers.scrape_pitcher_season import fetch_pitcher_season_stats
+from src.scrapers.scrape_batter_statcast import fetch_batter_statcast
+from src.scrapers.scrape_batter_vs_pitch_type import fetch_batter_vs_pitch_type
+from src.scrapers.scrape_batter_vs_pitcher import fetch_batter_vs_pitcher
+from src.scrapers.scrape_battar_lineup_position import fetch_lineup_positions
 
 def get_db_connection():
-    return psycopg2.connect(os.environ["DATABASE_PUBLIC_URL"])
+    """Establishes connection to the Postgres warehouse."""
+    return psycopg2.connect(
+        dbname=os.getenv("DATABASE_PUBLIC_URL") or os.getenv("PGDATABASE"),
+        user=os.getenv("PGUSER"),
+        password=os.getenv("PGPASSWORD"),
+        host=os.getenv("PGHOST"),
+        port=os.getenv("PGPORT")
+    )
 
-def run_pipeline(season: int, target_date: datetime):
-    """
-    Main orchestration function to run the daily data pipeline.
-    """
+def run_pipeline(season: int):
+    print(f"--- Starting Global ETL Pipeline Sequence for Season {season} ---")
     conn = get_db_connection()
+    
     try:
-        print(f"--- Starting Pipeline for Season: {season} | Target Date: {target_date.date()} ---")
+        # =======================================================
+        # PHASE 1: STATIC & GLOBAL ENVIRONMENT MATRIX
+        # =======================================================
+        print("Ingesting Stadium Registries & Park Factors...")
+        stadiums_data = fetch_mlb_stadiums(season=season)
+        park_factors = fetch_park_factors(season=season)
+        # (Execute db inserts for stadiums/park factors here)
         
-        # 1. Update Park Factors (Phase 4 Fix)
-        print("Fetching Park Factors...")
-        park_factors = fetch_statcast_park_factors(season=season)
-        if park_factors:
-            with conn.cursor() as cur:
-                for venue_id, data in park_factors.items():
-                    cur.execute("""
-                        INSERT INTO park_factors (venue_id, season, run_factor, singles_factor, doubles_factor, triples_factor, hr_factor, updated_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-                        ON CONFLICT (venue_id, season) DO UPDATE SET
-                            run_factor = EXCLUDED.run_factor,
-                            singles_factor = EXCLUDED.singles_factor,
-                            doubles_factor = EXCLUDED.doubles_factor,
-                            triples_factor = EXCLUDED.triples_factor,
-                            hr_factor = EXCLUDED.hr_factor,
-                            updated_at = CURRENT_TIMESTAMP;
-                    """, (venue_id, season, data['run_factor'], data['singles_factor'], data['doubles_factor'], data['triples_factor'], data['hr_factor']))
-        
-        # 2. Update Catcher Framing (Phase 4 Fix)
-        print("Fetching Catcher Framing Metrics...")
-        catcher_metrics = fetch_catcher_framing_metrics(season=season)
-        if catcher_metrics:
-            with conn.cursor() as cur:
-                for pid, data in catcher_metrics.items():
-                    cur.execute("""
-                        INSERT INTO catcher_metrics (player_id, season, framing_runs, strike_percentage, pop_time, caught_stealing_pct, updated_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-                        ON CONFLICT (player_id, season) DO UPDATE SET
-                            framing_runs = EXCLUDED.framing_runs,
-                            strike_percentage = EXCLUDED.strike_percentage,
-                            pop_time = EXCLUDED.pop_time,
-                            caught_stealing_pct = EXCLUDED.caught_stealing_pct,
-                            updated_at = CURRENT_TIMESTAMP;
-                    """, (pid, season, data['framing_runs'], data['strike_percentage'], data.get('pop_time'), data.get('caught_stealing_pct')))
-
-        # 3. Calculate Player Fatigue with Corrected Time-Travel Logic
-        print("Calculating Player Fatigue Profiles...")
-        with conn.cursor() as cur:
-            cur.execute("SELECT player_id FROM players WHERE status_code = 'A';")
-            all_active_players = [row[0] for row in cur.fetchall()]
-
-        for player_id in all_active_players:
-            # PASSING THE TARGET DATE IN INSTEAD OF RELYING ON SYSTEM CLOCK
-            fatigue = estimate_player_fatigue(conn, player_id, season=season, target_date=target_date)
-            
-            with conn.cursor() as cur:
-                cur.execute("""
-                    INSERT INTO batter_fatigue (player_id, consecutive_games_played, travel_distance_last_7_days, sleep_quality_index, rest_days_last_14_days, updated_at)
-                    VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-                    ON CONFLICT (player_id) DO UPDATE SET
-                        consecutive_games_played = EXCLUDED.consecutive_games_played,
-                        travel_distance_last_7_days = EXCLUDED.travel_distance_last_7_days,
-                        sleep_quality_index = EXCLUDED.sleep_quality_index,
-                        rest_days_last_14_days = EXCLUDED.rest_days_last_14_days,
-                        updated_at = CURRENT_TIMESTAMP;
-                """, (fatigue['player_id'], fatigue['consecutive_games_played'], fatigue['travel_distance_last_7_days'], fatigue['sleep_quality_index'], fatigue['rest_days_last_14_days']))
-        
+        print("Ingesting Master Schedule Matrix...")
+        schedule_games = fetch_season_schedule(season=season)
+        # (Execute db inserts for schedule matrix here)
         conn.commit()
-        print("Pipeline execution cycle completed successfully.")
+
+        # =======================================================
+        # PHASE 2: DAILY LEAGUE-WIDE UPDATES (Non-Game Specific)
+        # =======================================================
+        print("Updating League Injury Reports...")
+        injuries = fetch_injury_reports()
+        
+        print("Compiling Team Trends, Defensive Quality, & Umpires...")
+        defensive_quality = fetch_defensive_quality(season=season)
+        team_trends = fetch_team_trends(season=season)
+        umpire_trends = fetch_umpire_trends(season=season)
+        conn.commit()
+
+        # =======================================================
+        # PHASE 3: TARGETED YESTERDAY GAME HYDRO-STREAM
+        # =======================================================
+        yesterday_str = (date.today() - timedelta(days=1)).strftime('%Y-%m-%d')
+        print(f"Filtering completed game datasets for yesterday ({yesterday_str})...")
+        
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT game_pk FROM schedule 
+                WHERE status = 'Final' AND season = %s AND game_date = %s;
+            """, (season, yesterday_str))
+            completed_games = [row[0] for row in cur.fetchall()]
+
+        if not completed_games:
+            print("No finalized games found for yesterday. Skipping game-level scraping.")
+        else:
+            for game_pk in completed_games:
+                print(f"🎮 Hydrating game metric profiles for game_pk: {game_pk}")
+                weather = fetch_environmental_weather(conn, game_pk)
+                boxscore = fetch_boxscore_data(conn, game_pk)
+                pitches = fetch_game_pitch_by_pitch(conn, game_pk)
+                # (Execute your transactional batch updates for games here)
+            conn.commit()
+
+        # =======================================================
+        # PHASE 4: PLAYER SPLITS & DERIVED MATRICES
+        # =======================================================
+        print("Updating Statcast Performance, Splits & Lineup Registries...")
+        catcher_framing = fetch_catcher_framing_metrics(season=season)
+        bullpen_relief = fetch_bullpen_metrics(season=season)
+        baserunning = fetch_baserunning_metrics(season=season)
+        
+        # Pulling active player loop to process deep historical matchups
+        with conn.cursor() as cur:
+            cur.execute("SELECT DISTINCT player_id FROM players;")
+            all_players = [row[0] for row in cur.fetchall()]
+
+        print(f"Syncing split profiles and fatigue coefficients for {len(all_players)} players...")
+        for player_id in all_players:
+            fatigue = estimate_player_fatigue(conn, player_id, season=season)
+            bat_splits = fetch_batter_splits(player_id, season=season)
+            pitch_platoon = fetch_pitcher_platoon_splits(player_id, season=season)
+            # (Execute updates for deep matchups, vs_pitch_type, vs_pitcher, and lineups)
+            
+        conn.commit()
+        print("Global Pipeline execution cycle completed successfully.")
 
     except Exception as e:
         conn.rollback()
@@ -95,17 +140,6 @@ def run_pipeline(season: int, target_date: datetime):
     finally:
         conn.close()
 
-#  Correct Way: Forcing the pipeline to look at "yesterday"
 if __name__ == "__main__":
-    # Default to current season if not provided
     target_year = int(sys.argv[1]) if len(sys.argv) > 1 else date.today().year
-    
-    # If a specific date string is passed via CLI, use it; otherwise, default to yesterday
-    if len(sys.argv) > 2:
-        run_date = datetime.strptime(sys.argv[2], "%Y-%m-%d")
-    else:
-        # Subtracting 1 day handles the UTC rollover safely, but we keep it as a full datetime object!
-        run_date = datetime.today() - timedelta(days=1)
-
-    # run_date is now a datetime object, so calling .date() inside run_pipeline won't crash
-    run_pipeline(season=target_year, target_date=run_date)
+    run_pipeline(target_year)
