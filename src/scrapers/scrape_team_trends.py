@@ -21,7 +21,7 @@ def fetch_team_trends(team_id: int, season: int):
         if res_hit.status_code != 200 or res_pitch.status_code != 200:
             return trends
     except requests.exceptions.RequestException as e:
-        print(f"❌ Connection timeout fetching team logs for team {team_id}: {e}")
+        print(f"Connection timeout fetching team logs for team {team_id}: {e}")
         return trends
         
     hit_logs = res_hit.json().get("stats", [{}])[0].get("splits", [])
