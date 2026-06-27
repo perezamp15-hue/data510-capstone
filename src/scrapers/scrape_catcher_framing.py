@@ -1,5 +1,6 @@
 import pandas as pd
 import requests
+from io import StringIO
 
 def fetch_catcher_framing_metrics(season: int = 2026):
     """
@@ -14,42 +15,63 @@ def fetch_catcher_framing_metrics(season: int = 2026):
     
     catcher_map = {}
     
+    # FIX 1: Mask the Python scraper as a normal web browser to bypass Cloudflare
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    
     # Process Framing & Strike %
-    res_frame = requests.get(framing_url)
+    res_frame = requests.get(framing_url, headers=headers)
     if res_frame.status_code == 200:
-        from io import StringIO
-        df_frame = pd.read_csv(StringIO(res_frame.text))
-        for _, row in df_frame.iterrows():
-            pid = int(row.get('player_id'))
-            catcher_map[pid] = {
-                "player_id": pid,
-                "season": season,
-                "framing_runs": float(row.get('catcher_framing_runs', 0.0)),
-                "strike_percentage": float(row.get('strike_rate', 0.0)),
-                "pop_time": None,         # Placeholder for Step 2
-                "caught_stealing_pct": 0.0 # Placeholder for Step 2
-            }
+        try:
+            df_frame = pd.read_csv(StringIO(res_frame.text))
+            for _, row in df_frame.iterrows():
+                raw_pid = row.get('player_id')
+                
+                # FIX 2: Check for None or NaN before casting to integer
+                if pd.isna(raw_pid):
+                    continue
+                    
+                pid = int(raw_pid)
+                catcher_map[pid] = {
+                    "player_id": pid,
+                    "season": season,
+                    "framing_runs": float(row.get('catcher_framing_runs', 0.0) or 0.0),
+                    "strike_percentage": float(row.get('strike_rate', 0.0) or 0.0),
+                    "pop_time": None,         
+                    "caught_stealing_pct": 0.0 
+                }
+        except pd.errors.ParserError:
+            print("Failed to parse Catcher Framing CSV. Baseball Savant may have blocked the request.")
+        except Exception as e:
+            print(f"Error parsing framing data: {e}")
             
     # Process Pop Time & Caught Stealing %
-    res_pop = requests.get(pop_url)
+    res_pop = requests.get(pop_url, headers=headers)
     if res_pop.status_code == 200:
-        from io import StringIO
         try:
             df_pop = pd.read_csv(StringIO(res_pop.text))
             for _, row in df_pop.iterrows():
-                pid = int(row.get('player_id'))
-                if pid in catcher_map:
-                    catcher_map[pid]["pop_time"] = float(row.get('pop_time_2b', 0.0))
+                raw_pid = row.get('player_id')
+                
+                if pd.isna(raw_pid):
+                    continue
                     
-                    # SAFEGUARD: Calculate realized runtime success prevention rate safely
-                    sb = float(row.get('stolen_bases', 0))
-                    cs = float(row.get('caught_stealing', 0))
+                pid = int(raw_pid)
+                if pid in catcher_map:
+                    catcher_map[pid]["pop_time"] = float(row.get('pop_time_2b', 0.0) or 0.0)
+                    
+                    # Safe CS% calculation
+                    sb = float(row.get('stolen_bases', 0) or 0.0)
+                    cs = float(row.get('caught_stealing', 0) or 0.0)
                     total_attempts = sb + cs
                     
-                    # Prevent ZeroDivisionError
                     catcher_map[pid]["caught_stealing_pct"] = (
                         (cs / total_attempts) * 100 if total_attempts > 0 else 0.0
                     )
+        except pd.errors.ParserError:
+            print("Failed to parse Pop Time CSV. Baseball Savant may have blocked the request.")
         except Exception as e:
             print(f"Error parsing pop time CSV: {e}")
-    return list(catcher_map.values())
+            
+    return catcher_map
