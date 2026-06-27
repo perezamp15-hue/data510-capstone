@@ -47,7 +47,7 @@ def run_pipeline_for_date(target_date=None):
     print(f"=========================================\n")
     
     # -------------------------------------------------------------
-    # PHASE 1: CORE INDEXES & CONSTRAINTS
+    # PHASE 1: CORE INDEXES & CONSTRAINTS (Strict Structural Seeding)
     # -------------------------------------------------------------
     print("--- Phase 1: Syncing Core Indices ---")
     try: 
@@ -61,7 +61,7 @@ def run_pipeline_for_date(target_date=None):
         print(f"Parks sync failed: {e}")
 
     try: 
-        # Explicitly targets the master calendar framework first
+        # Explicitly targets the master calendar framework next so parent games exist
         scrape_schedule.run(season=2026)
     except Exception as e: 
         print(f"Schedule sync failed: {e}")
@@ -72,7 +72,7 @@ def run_pipeline_for_date(target_date=None):
         print(f"Roster sync failed: {e}")
 
     # -------------------------------------------------------------
-    # PHASE 2: PRIMARY EVENT INGESTION
+    # PHASE 2: PRIMARY EVENT INGESTION (Boxscore / Game Layer)
     # -------------------------------------------------------------
     print("\n--- Phase 2: Ingesting Daily Game Feeds ---")
     try: 
@@ -83,7 +83,7 @@ def run_pipeline_for_date(target_date=None):
         return
 
     # -------------------------------------------------------------
-    # PHASE 3: DEPENDENT TELEMETRY & METRICS
+    # PHASE 3: DEPENDENT TELEMETRY & METRICS (Children Layer)
     # -------------------------------------------------------------
     print("\n--- Phase 3: Processing Dependent Telemetry ---")
     try: 
