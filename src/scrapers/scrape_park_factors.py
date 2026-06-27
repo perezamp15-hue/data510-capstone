@@ -2,7 +2,7 @@ import pandas as pd
 from curl_cffi import requests
 from io import StringIO
 
-def fetch_statcast_park_factors(season: int = 2026):
+def fetch_park_factors(season: int):
     """
     Scrapes the official Statcast Park Factors directly from Baseball Savant.
     If the current season's data is not yet available, falls back to the previous year.
