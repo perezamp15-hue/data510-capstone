@@ -1,24 +1,18 @@
 import sys
-import os
 from datetime import datetime, timedelta
 
-# Dynamically append the scripts directory to Python's lookup path
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
-# Now these imports will work flawlessly both locally and in Railway!
-import scrape_statcast
-import scrape_game_feed
-import scrape_lineups
-import scrape_rosters
-import scrape_pitch_arsenal
-import scrape_defense
-import scrape_bullpen
-import scrape_weather
-import scrape_umpires
-import scrape_park_info
-import scrape_schedule
-
-# ... rest of your code remains exactly the same
+# Explicitly import your scrapers from the scripts package folder
+from scripts import scrape_statcast
+from scripts import scrape_game_feed
+from scripts import scrape_lineups
+from scripts import scrape_rosters
+from scripts import scrape_pitch_arsenal
+from scripts import scrape_defense
+from scripts import scrape_bullpen
+from scripts import scrape_weather
+from scripts import scrape_umpires
+from scripts import scrape_park_info
+from scripts import scrape_schedule
 
 def run_pipeline_for_date(target_date):
     print(f"\n=========================================")
