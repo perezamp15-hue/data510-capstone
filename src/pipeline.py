@@ -41,7 +41,7 @@ from src.scrapers.scrape_batter_splits import fetch_batter_splits       # Matchi
 from src.scrapers.scraper_player_splits import fetch_player_splits
 from src.scrapers.scrape_pitcher_platoon_splits import fetch_pitcher_platoon_splits
 from src.scrapers.scrape_pitcher_season import fetch_pitcher_season_stats
-from src.scrapers.scrape_batter_statcast import fetch_batter_statcast
+from src.scrapers.scrape_batter_statcast import fetch_batter_statcast_metric
 from src.scrapers.scrape_batter_vs_pitch_type import fetch_batter_vs_pitch_type
 from src.scrapers.scrape_batter_vs_pitcher import fetch_batter_vs_pitcher
 from src.scrapers.scrape_battar_lineup_position import fetch_lineup_positions
