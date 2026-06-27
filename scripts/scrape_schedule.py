@@ -5,26 +5,64 @@ from sqlalchemy import text
 
 def run(season=2026):
     print(f"Compiling framework calendar structures for {season}...")
-    url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&season={season}"
+    engine = get_engine()
+    
+    url = f"https://statsapi.mlb.com/api/v1/schedule/games/?sportId=1&season={season}"
     try:
-        data = fetch_api_json(url)
-        dates = data.get('dates', [])
-        parsed = []
-        engine = get_engine()
-        valid_games = pd.read_sql("SELECT game_pk FROM games", con=engine)['game_pk'].tolist()
-        for d in dates:
-            for g in d.get('games', []):
-                g_pk = int(g.get('gamePk'))
-                if g_pk not in valid_games: continue
-                parsed.append({"game_pk": g_pk, "season_year": season, "game_type": g.get('gameType', 'R')})
-        df = pd.DataFrame(parsed).drop_duplicates(subset=['game_pk'])
-        if df.empty: return
-        with engine.begin() as conn:
-            for _, row in df.iterrows():
-                conn.execute(text("""
-                    INSERT INTO team_schedules (game_pk, season_year, game_type) VALUES (:game_pk, :season_year, :game_type)
-                    ON CONFLICT (game_pk) DO UPDATE SET season_year = EXCLUDED.season_year, game_type = EXCLUDED.game_type;
-                """), row.to_dict())
-    except Exception as e: print(f"Schedule Error: {e}")
+        schedule_data = fetch_api_json(url)
+        dates_node = schedule_data.get('dates', [])
+    except Exception as e:
+        print(f"CRITICAL: Master calendar sync aborted: {e}")
+        return
 
-if __name__ == "__main__": run()
+    calendar_count = 0
+    for date_block in dates_node:
+        g_date = date_block.get('date')
+        games_list = date_block.get('games', [])
+        
+        for game in games_list:
+            pk = game.get('gamePk')
+            if not pk:
+                continue
+                
+            home_node = game.get('teams', {}).get('home', {})
+            away_node = game.get('teams', {}).get('away', {})
+            
+            sched_dict = {
+                "game_pk": int(pk),
+                "game_date": g_date,
+                "game_type": game.get('gameType', 'R'),
+                "season": int(season),
+                "home_team_id": int(home_node.get('team', {}).get('id')),
+                "away_team_id": int(away_node.get('team', {}).get('id')),
+                "park_id": int(game.get('venue', {}).get('id')), # Updated here as well
+                "home_score": int(home_node.get('score', 0)) if home_node.get('score') is not None else None,
+                "away_score": int(away_node.get('score', 0)) if away_node.get('score') is not None else None,
+                "game_status": game.get('status', {}).get('abstractGameState', 'Preview')
+            }
+            
+            try:
+                with engine.begin() as conn:
+                    conn.execute(text("""
+                        INSERT INTO games (
+                            game_pk, game_date, game_type, season, home_team_id, 
+                            away_team_id, park_id, home_score, away_score, game_status
+                        )
+                        VALUES (
+                            :game_pk, :game_date, :game_type, :season, :home_team_id, 
+                            :away_team_id, :park_id, :home_score, :away_score, :game_status
+                        )
+                        ON CONFLICT (game_pk) DO UPDATE SET
+                            game_status = EXCLUDED.game_status,
+                            home_score = EXCLUDED.home_score,
+                            away_score = EXCLUDED.away_score;
+                    """), sched_dict)
+                calendar_count += 1
+            except Exception:
+                continue
+
+    print(f"Master Schedule Sync finished: Indexed {calendar_count} games into structural framework.")
+
+if __name__ == "__main__":
+    passed_season = int(sys.argv[1]) if len(sys.argv) > 1 else 2026
+    run(passed_season)
