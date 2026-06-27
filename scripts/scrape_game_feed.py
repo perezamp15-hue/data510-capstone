@@ -1,166 +1,108 @@
 import sys
 import pandas as pd
+from datetime import datetime, timedelta
+import pytz
 from db_client import get_engine, fetch_api_json
 from sqlalchemy import text
 
-def run(target_date):
+def run(target_date=None):
+    if not target_date:
+        local_tz = pytz.timezone('America/Los_Angeles')
+        target_date = (datetime.now(local_tz) - timedelta(days=1)).strftime('%Y-%m-%d')
+        
     print(f"Ingesting main boxscore feed matrices for: {target_date}")
     engine = get_engine()
     
-    try:
-        season_year = int(str(target_date).split("-")[0])
-    except Exception:
-        season_year = 2026
-
-    url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={target_date}&hydrate=linescore,boxscore,decisions"
+    # 1. Fetch games scheduled for this date from the master schedule API
+    url = f"https://statsapi.mlb.com/api/v1/schedule/games/?sportId=1&date={target_date}"
     try:
         schedule_data = fetch_api_json(url)
-        dates = schedule_data.get('dates', [])
-        if not dates:
-            print(f"Game Feed Alert: No games scheduled on date {target_date}.")
+        dates_node = schedule_data.get('dates', [])
+        if not dates_node:
+            print(f"No scheduled games found on MLB API for date: {target_date}")
             return
-            
-        api_games = dates[0].get('games', [])
-        print(f"Game Feed discovered {len(api_games)} games on the MLB schedule API.")
+        games_list = dates_node[0].get('games', [])
     except Exception as e:
-        print(f"CRITICAL: Failed to fetch schedule feed: {e}")
+        print(f"Failed to fetch schedule feed for {target_date}: {e}")
         return
 
-    inserted_games = 0
+    print(f"Game Feed discovered {len(games_list)} games on the MLB schedule API.")
+    games_saved = 0
 
-    for g in api_games:
-        game_pk = g.get('gamePk')
-        if not game_pk: continue
-        
-        status_info = g.get('status', {})
-        abstract_state = status_info.get('abstractGameState')
-        detailed_state = status_info.get('detailedState')
-        
-        if abstract_state not in ['Final', 'Live', 'Preview'] and detailed_state != 'Final':
+    # 2. Loop through daily games and populate the primary table matrix
+    for game in games_list:
+        pk = game.get('gamePk')
+        if not pk:
             continue
-
-        # Core keys
-        game_type = g.get('gameType', 'R') 
-        api_venue_id = g.get('venue', {}).get('id')
+            
+        home_node = game.get('teams', {}).get('home', {})
+        away_node = game.get('teams', {}).get('away', {})
         
-        # --- PARK VERIFICATION LAYER ---
-        local_park_id = None
-        if api_venue_id:
+        # --- DYNAMIC METRIC EXTRACTION ---
+        # 1. Extract and process game duration safely
+        duration_minutes = None
+        game_length_str = game.get('status', {}).get('gameActualLength') # Often stored here or in linescore
+        
+        if not game_length_str:
+            # Fallback check inside game context if the status block hasn't updated it yet
+            game_length_str = game.get('gameLength')
+
+        if game_length_str:
             try:
-                with engine.connect() as conn:
-                    # Check if the park_id exists in your parks master table
-                    park_lookup = conn.execute(text("""
-                        SELECT park_id FROM parks WHERE park_id = :api_id LIMIT 1
-                    """), {"api_id": int(api_venue_id)}).fetchone()
-                    
-                    if park_lookup:
-                        local_park_id = park_lookup[0] 
-                    else:
-                        local_park_id = int(api_venue_id)
-            except Exception as lookup_err:
-                print(f"Park verification warning for Venue {api_venue_id}: {lookup_err}")
-                local_park_id = int(api_venue_id)
-        # ---------------------------------
+                if ":" in str(game_length_str):
+                    parts = str(game_length_str).split(":")
+                    duration_minutes = int(parts[0]) * 60 + int(parts[1])
+                else:
+                    duration_minutes = int(game_length_str)
+            except (ValueError, IndexError):
+                duration_minutes = None
 
-        home_node = g.get('teams', {}).get('home', {})
-        away_node = g.get('teams', {}).get('away', {})
-        
-        home_team_id = home_node.get('team', {}).get('id')
-        away_team_id = away_node.get('team', {}).get('id')
+        # 2. Extract attendance safely
+        attendance_val = game.get('attendance')
+        attendance_int = int(attendance_val) if attendance_val else None
 
-        # Pitcher Decisions
-        decisions = g.get('decisions', {})
-        winner_id = decisions.get('winner', {}).get('id')
-        loser_id = decisions.get('loser', {}).get('id')
-        save_id = decisions.get('save', {}).get('id')
-
-        day_night_type = g.get('dayNight')
-        raw_game_date = g.get('gameDate') 
-
-        # Parse Info array (Attendance and Duration)
-        game_info = g.get('boxscore', {}).get('info', [])
-        attendance = None
-        duration_mins = None
-        
-        for info in game_info:
-            label = info.get('label', '')
-            value = info.get('value', '')
-            if 'Attendance' in label or 'Att' in label:
-                try: 
-                    clean_val = ''.join(c for c in value if c.isdigit())
-                    attendance = int(clean_val)
-                except: pass
-            if label == 'T' or 'Duration' in label:
-                try:
-                    parts = value.split(':')
-                    duration_mins = int(parts[0]) * 60 + int(parts[1])
-                except: pass
-
-        # Fallback duration check
-        if not duration_mins and g.get('gameTimeMinutes'):
-            try: duration_mins = int(g.get('gameTimeMinutes'))
-            except: pass
-
-        # Scores
-        linescore = g.get('linescore', {})
-        home_score = linescore.get('teams', {}).get('home', {}).get('runs')
-        away_score = linescore.get('teams', {}).get('away', {}).get('runs')
-
-        game_data = {
-            "game_pk": int(game_pk),
+        game_dict = {
+            "game_pk": int(pk),
             "game_date": target_date,
-            "season": season_year,
-            "game_type": game_type,
-            "scheduled_start": raw_game_date, 
-            "park_id": local_park_id, 
-            "home_team_id": int(home_team_id) if home_team_id else None,
-            "away_team_id": int(away_team_id) if away_team_id else None,
-            "day_night_type": day_night_type,
-            "attendance": attendance,
-            "game_duration_minutes": duration_mins,
-            "home_score": home_score,
-            "away_score": away_score,
-            "winning_pitcher_id": int(winner_id) if winner_id else None,
-            "losing_pitcher_id": int(loser_id) if loser_id else None,
-            "save_pitcher_id": int(save_id) if save_id else None
+            "game_type": game.get('gameType', 'R'),
+            "season": int(game.get('season', 2026)),
+            "home_team_id": int(home_node.get('team', {}).get('id')),
+            "away_team_id": int(away_node.get('team', {}).get('id')),
+            "venue_id": int(game.get('venue', {}).get('id')),
+            "home_score": int(home_node.get('score', 0)) if home_node.get('score') is not None else None,
+            "away_score": int(away_node.get('score', 0)) if away_node.get('score') is not None else None,
+            "game_status": game.get('status', {}).get('abstractGameState', 'Final'),
+            "attendance": attendance_int,
+            "game_duration_minutes": duration_minutes
         }
 
+        # Safe relational execution context block
         try:
             with engine.begin() as conn:
                 conn.execute(text("""
                     INSERT INTO games (
-                        game_pk, game_date, season, game_type, scheduled_start, park_id, 
-                        home_team_id, away_team_id, day_night_type, 
-                        attendance, game_duration_minutes, home_score, away_score,
-                        winning_pitcher_id, losing_pitcher_id, save_pitcher_id
+                        game_pk, game_date, game_type, season, home_team_id, 
+                        away_team_id, venue_id, home_score, away_score, game_status,
+                        attendance, game_duration_minutes
                     )
                     VALUES (
-                        :game_pk, :game_date, :season, :game_type, :scheduled_start, :park_id, 
-                        :home_team_id, :away_team_id, :day_night_type, 
-                        :attendance, :game_duration_minutes, :home_score, :away_score,
-                        :winning_pitcher_id, :losing_pitcher_id, :save_pitcher_id
+                        :game_pk, :game_date, :game_type, :season, :home_team_id, 
+                        :away_team_id, :venue_id, :home_score, :away_score, :game_status,
+                        :attendance, :game_duration_minutes
                     )
                     ON CONFLICT (game_pk) DO UPDATE SET
-                        park_id = EXCLUDED.park_id,
-                        game_date = EXCLUDED.game_date,
-                        season = EXCLUDED.season,
-                        game_type = EXCLUDED.game_type,
-                        scheduled_start = EXCLUDED.scheduled_start,
-                        day_night_type = EXCLUDED.day_night_type,
-                        attendance = EXCLUDED.attendance,
-                        game_duration_minutes = EXCLUDED.game_duration_minutes,
                         home_score = EXCLUDED.home_score,
                         away_score = EXCLUDED.away_score,
-                        winning_pitcher_id = EXCLUDED.winning_pitcher_id,
-                        losing_pitcher_id = EXCLUDED.losing_pitcher_id,
-                        save_pitcher_id = EXCLUDED.save_pitcher_id;
-                """), game_data)
-            inserted_games += 1
-        except Exception as db_err:
-            print(f"Database write failure for Game {game_pk}: {db_err}")
+                        game_status = EXCLUDED.game_status,
+                        attendance = EXCLUDED.attendance,
+                        game_duration_minutes = EXCLUDED.game_duration_minutes;
+                """), game_dict)
+            games_saved += 1
+        except Exception as e:
+            print(f"Failed to write boxscore index for game {pk}: {e}")
+            continue
 
-    print(f"Game Feed Complete: Successfully saved {inserted_games} games using direct park mappings.")
+    print(f"Game Feed Complete: Successfully saved {games_saved} games with attendance and duration telemetry.")
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        run(sys.argv[1])
+    run(sys.argv[1] if len(sys.argv) > 1 else None)
