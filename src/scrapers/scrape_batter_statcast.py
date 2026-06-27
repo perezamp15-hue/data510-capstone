@@ -1,6 +1,6 @@
 import requests
 
-def fetch_batter_statcast_metrics(season: int):
+def fetch_batter_statcast_metric(season: int):
     """
     Scrapes advanced Statcast bat tracking and expected metric leaderboards 
     directly from Baseball Savant components.
