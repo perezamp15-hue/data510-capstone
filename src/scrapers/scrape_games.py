@@ -1,51 +1,69 @@
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime
 
 def fetch_game_information(target_date: str):
     """
     Fetches raw game essentials for a specific date (Format: 'YYYY-MM-DD').
-    Includes logic placeholder for post-game data (attendance, umpires).
+    Includes linescore, officials, and venue hydration data.
     """
-    # MLB StatsAPI schedule endpoint is completely free and public
     url = f"https://statsapi.mlb.com/api/v1/schedule/games/?sportId=1&date={target_date}&hydrate=linescore,officials,venue"
-    response = requests.get(url)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    }
     
+    try:
+        response = requests.get(url, headers=headers, timeout=12)
+    except requests.exceptions.RequestException as e:
+        print(f"Connection timeout fetching game schedule for {target_date}: {e}")
+        return []
+        
     if response.status_code != 200:
-        print(f"Failed to fetch games for {target_date}")
+        print(f"Failed to fetch games for {target_date} (Status: {response.status_code})")
         return []
         
     data = response.json()
     games_parsed = []
     
-    # Safely navigate JSON structure
     dates_list = data.get("dates", [])
     if not dates_list:
         return []
         
     for game in dates_list[0].get("games", []):
         game_pk = game.get("gamePk")
+        if not game_pk:
+            continue
+            
+        # Parse Time strings safely into database-ready ISO strings
+        game_date_utc = game.get("gameDate") 
+        try:
+            dt_obj = datetime.strptime(game_date_utc, "%Y-%m-%dT%H:%M:%SZ")
+            formatted_date = dt_obj.strftime("%Y-%m-%d")
+            formatted_time = dt_obj.strftime("%H:%M:%S")
+        except (ValueError, TypeError):
+            formatted_date = target_date
+            formatted_time = "00:00:00"
         
-        # Parse Time strings safely
-        game_date_utc = game.get("gameDate") # ISO timestamp
-        dt_obj = datetime.strptime(game_date_utc, "%Y-%m-%dT%H:%M:%SZ")
-        
-        # Umpires extraction (only populates post-game)
+        # Umpires extraction (populates post-game)
         umpires = []
         officials = game.get("officials", [])
         for official in officials:
-            if official.get("officialType", {}).get("description") == "Umpire":
-                umpires.append(official.get("official", {}).get("fullName"))
+            if "Umpire" in official.get("officialType", {}).get("description", ""):
+                name = official.get("official", {}).get("fullName")
+                if name:
+                    umpires.append(name)
 
-        # Base structure
         game_info = {
-            "game_pk": game_pk,
-            "game_date": dt_obj.date(),
-            "scheduled_time": dt_obj.time(),
-            "actual_start_time": game.get("linescore", {}).get("resumeTime"), # fallback to box score step if needed
+            "game_pk": int(game_pk),
+            "game_date": formatted_date,
+            "scheduled_time": formatted_time,
+            "actual_start_time": game.get("linescore", {}).get("resumeTime"),
             "stadium": game.get("venue", {}).get("name"),
+            "venue_id": game.get("venue", {}).get("id"),
             "home_team": game.get("teams", {}).get("home", {}).get("team", {}).get("name"),
+            "home_team_id": game.get("teams", {}).get("home", {}).get("team", {}).get("id"),
             "away_team": game.get("teams", {}).get("away", {}).get("team", {}).get("name"),
-            "attendance": game.get("attendance"), # Null if game hasn't happened yet
+            "away_team_id": game.get("teams", {}).get("away", {}).get("team", {}).get("id"),
+            "attendance": game.get("attendance"), 
             "umpire_crew": umpires,
             "day_night": game.get("dayNight"),
             "series_game_number": game.get("seriesGameNumber")
