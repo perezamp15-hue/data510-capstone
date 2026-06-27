@@ -59,10 +59,9 @@ def run(target_date=None):
             "season": int(game.get('season', 2026)),
             "home_team_id": int(home_node.get('team', {}).get('id')),
             "away_team_id": int(away_node.get('team', {}).get('id')),
-            "park_id": int(game.get('venue', {}).get('id')),  # Updated column map variable name
+            "park_id": int(game.get('venue', {}).get('id')),
             "home_score": int(home_node.get('score', 0)) if home_node.get('score') is not None else None,
             "away_score": int(away_node.get('score', 0)) if away_node.get('score') is not None else None,
-            "game_status": game.get('status', {}).get('abstractGameState', 'Final'),
             "attendance": attendance_int,
             "game_duration_minutes": duration_minutes
         }
@@ -72,18 +71,17 @@ def run(target_date=None):
                 conn.execute(text("""
                     INSERT INTO games (
                         game_pk, game_date, game_type, season, home_team_id, 
-                        away_team_id, park_id, home_score, away_score, game_status,
+                        away_team_id, park_id, home_score, away_score,
                         attendance, game_duration_minutes
                     )
                     VALUES (
                         :game_pk, :game_date, :game_type, :season, :home_team_id, 
-                        :away_team_id, :park_id, :home_score, :away_score, :game_status,
+                        :away_team_id, :park_id, :home_score, :away_score,
                         :attendance, :game_duration_minutes
                     )
                     ON CONFLICT (game_pk) DO UPDATE SET
                         home_score = EXCLUDED.home_score,
                         away_score = EXCLUDED.away_score,
-                        game_status = EXCLUDED.game_status,
                         attendance = EXCLUDED.attendance,
                         game_duration_minutes = EXCLUDED.game_duration_minutes;
                 """), game_dict)
