@@ -1,7 +1,7 @@
 import requests
 from datetime import datetime
 
-def fetch_reliever_bullpen_stats(player_id: int, season: int):
+def fetch_bullpen_metrics(season: int):
     """
     Scrapes high-leverage relief metrics, situational data (Saves/Holds/Inherited Runners),
     and current workload tracking parameters for a bullpen arm.
