@@ -1,0 +1,42 @@
+name: Daily Baseball Data Ingestion
+
+on:
+  schedule:
+    - cron: '0 5 * * *' # Runs daily at 5:00 AM UTC
+  workflow_dispatch: # Allows you to trigger it manually from GitHub UI
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-with: '3.10'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Run ETL Ingestion Script
+      env:
+        # Pass your Railway secret to your environment variables
+        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      run: |
+        python -c "
+        import os, sys
+        from datetime import datetime, timedelta
+        # Calculate yesterday's date to fetch finalized data
+        yesterday = (datetime.utcnow() - timedelta(days=1)).strftime('%Y-%m-%d')
+        
+        # Modify your ingestion execution script to dynamically grab the date
+        from scripts.ingest_daily_games import run_daily_pipeline
+        print(f'Starting automated ingestion for date: {yesterday}')
+        run_daily_pipeline(yesterday)
+        "
