@@ -24,7 +24,7 @@ def fetch_batter_splits(player_id: int, season: int):
     try:
         response = requests.get(url, headers=headers, timeout=10)
     except requests.exceptions.RequestException as e:
-        print(f"❌ Connection timeout pulling splits for batter {player_id}: {e}")
+        print(f"Connection timeout pulling splits for batter {player_id}: {e}")
         return splits_payload
         
     if response.status_code != 200:
