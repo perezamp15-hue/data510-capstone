@@ -16,7 +16,7 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
-        python-with: '3.10'
+        python-version: '3.10' # Fixed from 'python-with'
         cache: 'pip'
 
     - name: Install dependencies
@@ -35,8 +35,8 @@ jobs:
         # Calculate yesterday's date to fetch finalized data
         yesterday = (datetime.utcnow() - timedelta(days=1)).strftime('%Y-%m-%d')
         
-        # Modify your ingestion execution script to dynamically grab the date
-        from scripts.ingest_daily_games import run_daily_pipeline
+        # Imported the corrected master function name from your unified scraper
+        from scripts.ingest_daily_games import ingest_master_pipeline
         print(f'Starting automated ingestion for date: {yesterday}')
-        run_daily_pipeline(yesterday)
+        ingest_master_pipeline(yesterday)
         "
