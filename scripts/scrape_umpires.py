@@ -1,41 +1,31 @@
 import sys
 import pandas as pd
-from datetime import datetime, timedelta
-import pytz
 from db_client import get_engine, fetch_api_json
 from sqlalchemy import text
 
 def run(target_date=None):
-    if not target_date:
-        local_tz = pytz.timezone('America/Los_Angeles')
-        target_date = (datetime.now(local_tz) - timedelta(days=1)).strftime('%Y-%m-%d')
-    
-    print(f"Syncing game umpires directly via API Schedule for window: {target_date}")
-    
-    schedule_url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={target_date}"
-    try:
-        schedule_data = fetch_api_json(schedule_url)
-        dates_node = schedule_data.get('dates', [])
-        if not dates_node:
-            print(f"No games found on schedule for date: {target_date}")
-            return
-        api_games = [g.get('gamePk') for g in dates_node[0].get('games', []) if g.get('gamePk')]
-    except Exception as e:
-        print(f"Schedule extraction failed: {e}")
-        return
-        
-    # --- FIX: Cross-reference with master games table to respect Foreign Keys ---
     engine = get_engine()
+    
+    print("Scanning database for games missing umpire profiles...")
     try:
-        db_games = pd.read_sql("SELECT game_pk FROM games", con=engine)['game_pk'].tolist()
-        valid_games = [pk for pk in api_games if pk in db_games]
+        # Pulls any historical games in your system lacking tracking entries in game_umpires
+        query = """
+            SELECT g.game_pk 
+            FROM games g
+            LEFT JOIN game_umpires gu ON g.game_pk = gu.game_pk
+            WHERE gu.game_pk IS NULL
+            LIMIT 50;
+        """
+        valid_games = pd.read_sql(query, con=engine)['game_pk'].tolist()
+        
         if not valid_games:
-            print("No matching games found in the master database table for today.")
+            print("Database Status: All existing games already have umpire profiles mapped!")
             return
+            
+        print(f"Found {len(valid_games)} games ready to capture umpire assignments.")
     except Exception as e:
-        print(f"Database integrity cross-reference failed: {e}")
+        print(f"Database cross-reference failed: {e}")
         return
-    # --------------------------------------------------------------------------
         
     all_umps = {}
     assignments = []
@@ -46,7 +36,13 @@ def run(target_date=None):
             data = fetch_api_json(url)
             officials = data.get('officials', [])
             
-            assign = {"game_pk": pk, "home_plate_ump_id": None, "first_base_ump_id": None, "second_base_ump_id": None, "third_base_ump_id": None}
+            assign = {
+                "game_pk": int(pk), 
+                "home_plate_ump_id": None, 
+                "first_base_ump_id": None, 
+                "second_base_ump_id": None, 
+                "third_base_ump_id": None
+            }
             
             for official in officials:
                 pos = official.get('officialType')
@@ -91,4 +87,4 @@ def run(target_date=None):
     print(f"Umpire assignments successfully written for {len(assignments)} games.")
 
 if __name__ == "__main__":
-    run(sys.argv[1] if len(sys.argv) > 1 else None)
+    run()
