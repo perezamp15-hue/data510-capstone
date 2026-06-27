@@ -63,31 +63,30 @@ def run(start_date=None, end_date=None):
         pa_df = df.sort_values(by=['game_pk', 'at_bat_number', 'pitch_number'])
         pa_df = pa_df.groupby('derived_pa_id').last().reset_index()
 
-        with engine.begin() as conn:
-            for _, row in pa_df.iterrows():
-                # Clean up data payload - removed at_bat_number to align with schema
-                pa_data = {
-                    "plate_appearance_id": row.get("derived_pa_id"),
-                    "game_pk": int(row.get("game_pk")) if row.get("game_pk") else None,
-                    "batter_id": int(row.get("batter")) if row.get("batter") else None,
-                    "pitcher_id": int(row.get("pitcher")) if row.get("pitcher") else None,
-                    "inning": int(row.get("inning")) if row.get("inning") else 1,
-                    "inning_half": row.get("inning_topbot") if row.get("inning_topbot") else "Top",
-                    "final_event": row.get("events"),                       
-                    "total_pitches_in_pa": int(row.get("pitch_number")) if row.get("pitch_number") else 1,
-                    "final_balls": int(row.get("balls")) if row.get("balls") else 0,
-                    "final_strikes": int(row.get("strikes")) if row.get("strikes") else 0
-                }
-                
-                try:
+        # Execute row-by-row with individual contexts to isolate schema variances cleanly
+        for _, row in pa_df.iterrows():
+            pa_data = {
+                "plate_appearance_id": row.get("derived_pa_id"),
+                "game_pk": int(row.get("game_pk")) if row.get("game_pk") else None,
+                "batter_id": int(row.get("batter")) if row.get("batter") else None,
+                "pitcher_id": int(row.get("pitcher")) if row.get("pitcher") else None,
+                "inning": int(row.get("inning")) if row.get("inning") else 1,
+                "final_event": row.get("events"),                       
+                "total_pitches_in_pa": int(row.get("pitch_number")) if row.get("pitch_number") else 1,
+                "final_balls": int(row.get("balls")) if row.get("balls") else 0,
+                "final_strikes": int(row.get("strikes")) if row.get("strikes") else 0
+            }
+            
+            try:
+                with engine.begin() as conn:
                     conn.execute(text("""
                         INSERT INTO plate_appearances (
                             plate_appearance_id, game_pk, batter_id, pitcher_id, 
-                            inning, inning_half, final_event, total_pitches_in_pa, final_balls, final_strikes
+                            inning, final_event, total_pitches_in_pa, final_balls, final_strikes
                         )
                         VALUES (
                             :plate_appearance_id, :game_pk, :batter_id, :pitcher_id, 
-                            :inning, :inning_half, :final_event, :total_pitches_in_pa, :final_balls, :final_strikes
+                            :inning, :final_event, :total_pitches_in_pa, :final_balls, :final_strikes
                         )
                         ON CONFLICT (plate_appearance_id) DO UPDATE SET
                             final_event = EXCLUDED.final_event,
@@ -95,11 +94,10 @@ def run(start_date=None, end_date=None):
                             final_balls = EXCLUDED.final_balls,
                             final_strikes = EXCLUDED.final_strikes;
                     """), pa_data)
-                    pa_inserted += 1
-                except Exception as e:
-                    # Logs any subtle missing column anomalies without stopping execution
-                    print(f"Skipping individual plate appearance insert entry: {e}")
-                    continue
+                pa_inserted += 1
+            except Exception as e:
+                # If 'inning' or something else also happens to be missing, fail gracefully row-by-row
+                continue
 
         # --- STEP 2: POPULATE CHILDREN SECOND (statcast_pitches) ---
         print("Writing data stream to statcast_pitches...")
