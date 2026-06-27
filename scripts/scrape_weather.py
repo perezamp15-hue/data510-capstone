@@ -1,4 +1,5 @@
 import sys
+import re
 import pandas as pd
 from datetime import datetime, timedelta
 import pytz
@@ -21,7 +22,6 @@ def run(target_date=None):
 
     weather_count = 0
     for pk in valid_games:
-        # Crucial Fix: MLB live data feed requires the v1.1 endpoint path
         url = f"https://statsapi.mlb.com/api/v1.1/game/{pk}/feed/live"
         try:
             data = fetch_api_json(url)
@@ -35,15 +35,26 @@ def run(target_date=None):
                 continue
                 
             raw_wind = info.get('wind', '0')
+            
+            # 1. Parse the numerical wind speed safely
             wind_speed = "".join(filter(str.isdigit, str(raw_wind)))
             wind_speed_int = int(wind_speed) if wind_speed else 0
+
+            # 2. Smart Direction Fallback Parsing
+            # If 'direction' is empty, try splitting '12 mph, In From LF' to capture 'In From LF'
+            direction_str = info.get('direction')
+            if not direction_str or direction_str.strip() == "":
+                if "," in str(raw_wind):
+                    direction_str = str(raw_wind).split(",", 1)[1].strip()
+                else:
+                    direction_str = "None"
 
             w_dict = {
                 "game_pk": int(pk), 
                 "temperature_f": int(temp_str), 
                 "sky_condition": info.get('condition'), 
                 "wind_speed_mph": wind_speed_int, 
-                "wind_direction": info.get('direction')
+                "wind_direction": direction_str
             }
             
             with engine.begin() as conn:
@@ -58,10 +69,9 @@ def run(target_date=None):
                 """), w_dict)
             weather_count += 1
         except Exception as e:
-            # Safely skip individual unmatched records without stopping the pipeline
             continue
 
-    print(f"Weather updates completed: Ingested {weather_count} records.")
+    print(f"Weather updates completed: Ingested {weather_count} records with directional fallbacks.")
 
 if __name__ == "__main__":
     run(sys.argv[1] if len(sys.argv) > 1 else None)
