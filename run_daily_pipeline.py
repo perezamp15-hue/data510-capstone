@@ -7,7 +7,7 @@ scripts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'scripts'
 if scripts_dir not in sys.path:
     sys.path.insert(0, scripts_dir)
 
-# Clean, direct module imports
+# Standard module imports matching your directory layout
 import scrape_statcast
 import scrape_game_feed
 import scrape_lineups
@@ -68,19 +68,11 @@ def run_pipeline_for_date(target_date):
     print(f"\nCompleted execution block for {target_date}!")
 
 if __name__ == '__main__':
-    # Determine the date scopes dynamically
-    today_str = datetime.now().strftime('%Y-%m-%d')
-    yesterday_str = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
-    
     if len(sys.argv) > 1:
-        # If a manual argument is given, run just that date
+        # Allows you to pass a custom date manually if you ever need a historic backfill
         run_pipeline_for_date(sys.argv[1])
     else:
-        print(f"Kicking off multi-day automated rolling window loop...")
-        # 1. Run yesterday first to capture late/finalized box scores
+        # Dynamically targets exactly 24 hours ago to guarantee finalized boxscores
+        yesterday_str = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+        print(f"Automated pipeline running for finalized data from yesterday...")
         run_pipeline_for_date(yesterday_str)
-        # 2. Run today to capture live/early schedules and lineups
-        run_pipeline_for_date(today_str)
-        print("\n=========================================")
-        print("ALL TARGETED ROLLING DATES SYNCED PERFECTLY!")
-        print("=========================================\n")
