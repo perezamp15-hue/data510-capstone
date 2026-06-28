@@ -7,7 +7,7 @@ def seed_static_dimensions():
     print("Initializing Master Data Warehousing Dimensions with 2026 Registry...")
     engine = get_engine()
 
-    # 🏔️ Exact 2026 Live MLB API ID-to-Elevation Mapping Matrix
+    # Exact 2026 Live MLB API ID-to-Elevation Mapping Matrix
     ELEVATION_REGISTRY = {
         1: 54,       # Angel Stadium
         2: 30,       # Oriole Park at Camden Yards
