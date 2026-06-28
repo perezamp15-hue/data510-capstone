@@ -27,6 +27,7 @@ def run(target_date):
                 temp, sky, wind_spd, wind_direction = None, None, None, None
                 hp_id, fb_id, sb_id, tb_id = None, None, None, None
                 officials_list = []
+                weather_str = ""
                 
                 dh_flag = g.get('doubleHeader') in ['Y', 'S']
 
@@ -40,53 +41,47 @@ def run(target_date):
                 is_home_team_win = home_score > away_score
                 winning_team_id = home_team_id if is_home_team_win else away_team_id
 
-                # 2. Try standard boxscore endpoint for weather matrices
-                # Try standard boxscore endpoint for baseline officials list
+                # 2. Try standard boxscore endpoint for baseline officials list
                 box_url = f"https://statsapi.mlb.com/api/v1/game/{game_pk}/boxscore"
-                box_res = requests.get(box_url)
-                weather_str = ""
-                
-                if box_res.status_code == 200:
-                    box_data = box_res.json()
-                    officials_list = box_data.get('officials', [])
-                    
-                    # Look for weather in boxscore first
-                    info_list = box_data.get('info', [])
-                    weather_node = next((i for i in info_list if i.get('label') == 'Weather'), None)
-                    if weather_node:
-                        weather_str = weather_node.get('value', '')
-                        
-                #DEEP FETCH: Scrape live feed for missing officials AND the complete weather string
                 try:
-                    live_url = f"https://statsapi.mlb.com/api/v1/game/{game_pk}/feed/live"
-                    live_data = requests.get(live_url).json()
-                    
-                    if not officials_list:
-                        officials_list = live_data.get('liveData', {}).get('boxscore', {}).get('officials', [])
-                    
-                    # If boxscore weather was missing/short, pull the live data record
-                    if not weather_str:
-                        live_info = live_data.get('liveData', {}).get('boxscore', {}).get('info', [])
-                        live_weather_node = next((i for i in live_info if i.get('label') == 'Weather'), None)
-                        if live_weather_node:
-                            weather_str = live_weather_node.get('value', '')
+                    box_res = requests.get(box_url)
+                    if box_res.status_code == 200:
+                        box_data = box_res.json()
+                        officials_list = box_data.get('officials', [])
+                        info_list = box_data.get('info', [])
+                        weather_node = next((i for i in info_list if i.get('label') == 'Weather'), None)
+                        if weather_node:
+                            weather_str = weather_node.get('value', '')
                 except:
                     pass
 
-                # Process the weather metrics safely using our string splitter
+                # 3. HISTORICAL ARCHIVE LOOKUP: Pull the live feed endpoint for explicit weather fields
+                try:
+                    live_url = f"https://statsapi.mlb.com/api/v1/game/{game_pk}/feed/live"
+                    live_res = requests.get(live_url)
+                    
+                    if live_res.status_code == 200:
+                        live_data = live_res.json()
+                        
+                        if not officials_list:
+                            officials_list = live_data.get('liveData', {}).get('boxscore', {}).get('officials', [])
+                        
+                        game_data_node = live_data.get('gameData', {})
+                        weather_block = game_data_node.get('weather', {})
+                        
+                        if weather_block:
+                            if weather_block.get('temp'):
+                                temp = int(weather_block.get('temp'))
+                            if weather_block.get('condition'):
+                                sky = weather_block.get('condition')
+                            if weather_block.get('wind'):
+                                weather_str = weather_block.get('wind', '')
+                except Exception as e:
+                    print(f"Live feed deep lookup skipped for game {game_pk}: {e}")
+
+                # 4Substring Wind Splitter Engine
                 if weather_str:
                     try:
-                        # 1. Parse Temperature
-                        temp_match = re.search(r'(\d+)\s*degrees', weather_str, re.IGNORECASE)
-                        if temp_match:
-                            temp = int(temp_match.group(1))
-                        
-                        # 2. Parse Sky Condition
-                        parts = weather_str.split(',', 1)
-                        if len(parts) > 1:
-                            sky = parts[1].split('.')[0].strip()
-                        
-                        # 3.Substring Wind Splitter Engine
                         weather_lower = weather_str.lower()
                         
                         if "roof closed" in weather_lower or "indoors" in weather_lower:
@@ -98,22 +93,23 @@ def run(target_date):
                             if speed_digits:
                                 wind_spd = int(speed_digits[-1])
                             
-                            dir_text = right_side.replace('.', '').strip().upper()
+                            dir_text = right_side.replace('.', '').replace(',', '').strip().upper()
                             wind_direction = dir_text if dir_text else "CALM"
                         else:
-                            wind_spd = 0
-                            wind_direction = "CALM"
-                            
-                    except Exception as e:
-                        print(f"Weather parser skipped row formatting on game {game_pk}: {e}")
-                # Fallback to Live Feed for missing officials
-                if not officials_list:
-                    try:
-                        live_url = f"https://statsapi.mlb.com/api/v1/game/{game_pk}/feed/live"
-                        live_data = requests.get(live_url).json()
-                        officials_list = live_data.get('liveData', {}).get('boxscore', {}).get('officials', [])
+                            speed_digits = re.findall(r'\d+', weather_lower)
+                            if speed_digits:
+                                wind_spd = int(speed_digits[0])
+                                wind_direction = weather_lower.replace(str(wind_spd), '').strip().upper()
+                            else:
+                                wind_spd = 0
+                                wind_direction = "CALM"
                     except:
-                        pass
+                        wind_spd = 0
+                        wind_direction = "CALM"
+                else:
+                    if not wind_spd:
+                        wind_spd = 0
+                        wind_direction = "CALM"
 
                 # Parse and seed game officials
                 for off in officials_list:
