@@ -1,88 +1,83 @@
 import sys
-import pandas as pd
-from datetime import datetime, timedelta
-import pytz
-from db_client import get_engine, fetch_api_json
+import requests
+from datetime import datetime
 from sqlalchemy import text
+from db_client import get_engine
 
-def run(target_date=None):
-    if not target_date:
-        local_tz = pytz.timezone('America/Los_Angeles')
-        target_date = (datetime.now(local_tz) - timedelta(days=1)).strftime('%Y-%m-%d')
-        
-    print(f"Ingesting main boxscore feed matrices for: {target_date}")
+def run(target_date):
+    print(f"Loading Core Game Records for date context: {target_date}")
     engine = get_engine()
     
-    # Crucial Fix: Appended &hydrate=decisions to unpack player identities for post-game pitchers
-    url = f"https://statsapi.mlb.com/api/v1/schedule/games/?sportId=1&date={target_date}&hydrate=decisions"
-    try:
-        schedule_data = fetch_api_json(url)
-        dates_node = schedule_data.get('dates', [])
-        if not dates_node:
-            print(f"No scheduled games found on MLB API for date: {target_date}")
-            return
-        games_list = dates_node[0].get('games', [])
-    except Exception as e:
-        print(f"Failed to fetch schedule feed for {target_date}: {e}")
+    url = f"https://statsapi.mlb.com/api/v1/schedule/games/?sportId=1&date={target_date}"
+    dates = requests.get(url).json().get('dates', [])
+    if not dates:
+        print("No matches scheduled on this date window.")
         return
 
-    print(f"Game Feed discovered {len(games_list)} games on the MLB schedule API.")
-    games_saved = 0
+    with engine.begin() as conn:
+        for date_node in dates:
+            for g in date_node.get('games', []):
+                game_pk = g['gamePk']
+                status = g.get('status', {}).get('abstractGameState', '')
+                if status != 'Final':
+                    continue
 
-    for game in games_list:
-        pk = game.get('gamePk')
-        if not pk:
-            continue
-            
-        home_node = game.get('teams', {}).get('home', {})
-        away_node = game.get('teams', {}).get('away', {})
-        decisions_node = game.get('decisions', {})
-        
-        game_dict = {
-            "game_pk": int(pk),
-            "game_date": target_date,
-            "game_type": game.get('gameType', 'R'),
-            "season": int(game.get('season', 2026)),
-            "home_team_id": int(home_node.get('team', {}).get('id')),
-            "away_team_id": int(away_node.get('team', {}).get('id')),
-            "park_id": int(game.get('venue', {}).get('id')),
-            "home_score": int(home_node.get('score')) if home_node.get('score') is not None else None,
-            "away_score": int(away_node.get('score')) if away_node.get('score') is not None else None,
-            "day_night_type": game.get('dayNight'),
-            "scheduled_start": game.get('gameDate'), # Maps the UTC start timestamp
-            "winning_pitcher_id": int(decisions_node.get('winner', {}).get('id')) if decisions_node.get('winner') else None,
-            "losing_pitcher_id": int(decisions_node.get('loser', {}).get('id')) if decisions_node.get('loser') else None,
-            "save_pitcher_id": int(decisions_node.get('save', {}).get('id')) if decisions_node.get('save') else None
-        }
+                # Fetch detailed boxscore endpoint data inline to handle contextual details
+                box_url = f"https://statsapi.mlb.com/api/v1/game/{game_pk}/boxscore"
+                box_res = requests.get(box_url)
+                temp, sky, wind_spd, wind_dir = None, None, None, None
+                hp_id, fb_id, sb_id, tb_id = None, None, None, None
+                
+                if box_res.status_code == 200:
+                    box_data = box_res.json()
+                    # Parse weather details
+                    info = box_data.get('info', [])
+                    weather_str = next((i['value'] for i in info if i['label'] == 'Weather'), '')
+                    if weather_str and ':' in weather_str:
+                        try:
+                            # Sample parse: "72 degrees, Sky Clear. Wind 5 mph out to CF"
+                            parts = weather_str.split(',')
+                            temp = int(parts[0].lower().replace('degrees', '').strip())
+                            if len(parts) > 1:
+                                sky = parts[1].strip()
+                        except:
+                            pass
 
-        try:
-            with engine.begin() as conn:
+                    # Parse field official positions
+                    for off in box_data.get('officials', []):
+                        oid = off['official']['id']
+                        role = off['officialType']
+                        
+                        # Add tracking insert to lookup dimension safety step
+                        conn.execute(text("INSERT INTO umpires (umpire_id, umpire_name) VALUES (:id, :name) ON CONFLICT DO NOTHING;"), {"id": oid, "name": off['official']['fullName']})
+                        
+                        if role == 'Home Plate': hp_id = oid
+                        elif role == 'First Base': fb_id = oid
+                        elif role == 'Second Base': sb_id = oid
+                        elif role == 'Third Base': tb_id = oid
+
+                teams = g.get('teams', {})
+                start_time = g.get('gameDate')
+                start_dt = datetime.strptime(start_time, "%Y-%m-%dT%H:%M:%SZ") if start_time else None
+
                 conn.execute(text("""
                     INSERT INTO games (
-                        game_pk, game_date, game_type, season, home_team_id, 
-                        away_team_id, park_id, home_score, away_score, day_night_type,
-                        scheduled_start, winning_pitcher_id, losing_pitcher_id, save_pitcher_id
-                    )
-                    VALUES (
-                        :game_pk, :game_date, :game_type, :season, :home_team_id, 
-                        :away_team_id, :park_id, :home_score, :away_score, :day_night_type,
-                        :scheduled_start, :winning_pitcher_id, :losing_pitcher_id, :save_pitcher_id
-                    )
-                    ON CONFLICT (game_pk) DO UPDATE SET
-                        home_score = EXCLUDED.home_score,
-                        away_score = EXCLUDED.away_score,
-                        day_night_type = EXCLUDED.day_night_type,
-                        scheduled_start = EXCLUDED.scheduled_start,
-                        winning_pitcher_id = EXCLUDED.winning_pitcher_id,
-                        losing_pitcher_id = EXCLUDED.losing_pitcher_id,
-                        save_pitcher_id = EXCLUDED.save_pitcher_id;
-                """), game_dict)
-            games_saved += 1
-        except Exception as e:
-            print(f"Failed to write boxscore index for game {pk}: {e}")
-            continue
-
-    print(f"Game Feed Complete: Successfully saved {games_saved} games.")
-
-if __name__ == "__main__":
-    run(sys.argv[1] if len(sys.argv) > 1 else None)
+                        game_pk, game_date, season, game_type, scheduled_start, park_id, home_team_id, away_team_id,
+                        home_score, away_score, winning_pitcher_id, losing_pitcher_id, save_pitcher_id, day_night_type, is_doubleheader,
+                        temperature_f, sky_condition, wind_speed_mph, wind_direction, home_plate_ump_id, first_base_ump_id, second_base_ump_id, third_base_ump_id
+                    ) VALUES (
+                        :game_pk, :game_date, :season, :game_type, :start, :park, :home, :away, :h_score, :a_score, :win, :lose, :save, :dn, :dh,
+                        :temp, :sky, :w_spd, :w_dir, :hp, :fb, :sb, :tb
+                    ) ON CONFLICT (game_pk) DO UPDATE SET
+                        home_score = EXCLUDED.home_score, away_score = EXCLUDED.away_score,
+                        temperature_f = EXCLUDED.temperature_f, sky_condition = EXCLUDED.sky_condition;
+                """), {
+                    "game_pk": game_pk, "game_date": datetime.strptime(target_date, "%Y-%m-%d").date(), "season": g.get('season', 2023),
+                    "game_type": g.get('gameType', 'R'), "start": start_dt, "park": g.get('venue', {}).get('id'),
+                    "home": teams.get('home', {}).get('team', {}).get('id'), "away": teams.get('away', {}).get('team', {}).get('id'),
+                    "h_score": teams.get('home', {}).get('score'), "a_score": teams.get('away', {}).get('score'),
+                    "win": g.get('decisions', {}).get('winner', {}).get('id'), "lose": g.get('decisions', {}).get('loser', {}).get('id'),
+                    "save": g.get('decisions', {}).get('save', {}).get('id'), "dn": g.get('dayNight'), "dh": g.get('doubleHeader') == 'Y',
+                    "temp": temp, "sky": sky, "w_spd": wind_spd, "w_dir": wind_dir, "hp": hp_id, "fb": fb_id, "sb": sb_id, "tb": tb_id
+                })
+    print(f"Core games mapping entries finalized for date window: {target_date}")
