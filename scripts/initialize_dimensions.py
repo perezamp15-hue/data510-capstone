@@ -23,7 +23,7 @@ def seed_static_dimensions():
         22: 261,     # Dodger Stadium
         31: 25,      # PNC Park
         32: 615,     # American Family Field (Milwaukee)
-        680, 10,     # T-Mobile Park
+        680: 10,     # T-Mobile Park
         2392: 41,    # Daikin Park (Formerly Minute Maid Park - Houston)
         2394: 595,   # Comerica Park
         2395: 20,    # Oracle Park
