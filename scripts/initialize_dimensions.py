@@ -3,7 +3,7 @@ import requests
 from sqlalchemy import text
 from db_client import get_engine
 
-def run():
+def seed_static_dimensions():
     print("Initializing Master Data Warehousing Dimensions...")
     engine = get_engine()
 
