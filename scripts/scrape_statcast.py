@@ -1,271 +1,72 @@
 import sys
-import io
-import math
-import requests
 import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta
-import pytz
-from db_client import get_engine
+from pybaseball import statcast_date_range
 from sqlalchemy import text
+from db_client import get_engine
 
-def get_base_state_string(on_1b, on_2b, on_3b):
-    """Maps player IDs or truthy values to a standardized '000' base state string."""
-    b1 = "1" if on_1b else "0"
-    b2 = "1" if on_2b else "0"
-    b3 = "1" if on_3b else "0"
-    return f"{b1}{b2}{b3}"
-
-def run(start_date=None, end_date=None):
-    if not start_date or not end_date:
-        local_tz = pytz.timezone('America/Los_Angeles')
-        yesterday = (datetime.now(local_tz) - timedelta(days=1)).strftime('%Y-%m-%d')
-        start_date = start_date or yesterday
-        end_date = end_date or yesterday
-
-    print(f"Pulling Statcast streams between {start_date} and {end_date}...")
-    url = f"https://baseballsavant.mlb.com/statcast_search/csv?all=true&type=details&game_date_gt={start_date}&game_date_lt={end_date}"
+def run(start_date, end_date):
+    print(f"Pulling Statcast track logs for block window: {start_date} -> {end_date}")
+    engine = get_engine()
     
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5"
-    }
-    
+    # 1. Extract raw data via pybaseball api stream interface layer
     try:
-        response = requests.get(url, headers=headers, timeout=30)
-        response.raise_for_status() 
-        
-        df = pd.read_csv(io.StringIO(response.text), low_memory=False)
-        
-        if df.empty:
-            print("No Statcast data found for this date range.")
-            return
-
-        df = df.replace({np.nan: None})
-        
-        engine = get_engine()
-        try:
-            valid_g_pks = pd.read_sql("SELECT game_pk FROM games", con=engine)['game_pk'].tolist()
-        except Exception:
-            valid_g_pks = []
-
-        if valid_g_pks and 'game_pk' in df.columns:
-            df = df[df['game_pk'].isin(valid_g_pks)]
-
-        if df.empty:
-            print("Statcast data retrieved, but no matching games found in internal database.")
-            return
-
-        if 'pitch_id' not in df.columns or df['pitch_id'].isnull().all():
-            df['pitch_id'] = df['game_pk'].astype(str) + "_" + df['pitcher'].astype(str) + "_" + df['batter'].astype(str) + "_" + df['pitch_number'].astype(str)
-        
-        df['derived_pa_id'] = df['game_pk'].astype(str) + "_" + df['inning_topbot'].fillna('Top').astype(str) + "_" + df['at_bat_number'].astype(str)
-
-        pitches_inserted = 0
-        pa_inserted = 0
-        batted_balls_inserted = 0
-
-        # --- STEP 1: POPULATE PARENTS FIRST (plate_appearances) ---
-        print("Extracting final matchup events to populate plate_appearances...")
-        df_sorted = df.sort_values(by=['game_pk', 'at_bat_number', 'pitch_number'])
-        
-        pa_start_df = df_sorted.groupby('derived_pa_id').first().reset_index()
-        pa_end_df = df_sorted.groupby('derived_pa_id').last().reset_index()
-
-        pa_end_maps = {row['derived_pa_id']: row for _, row in pa_end_df.iterrows()}
-
-        with engine.begin() as conn:
-            for _, start_row in pa_start_df.iterrows():
-                pa_id = start_row.get("derived_pa_id")
-                end_row = pa_end_maps.get(pa_id, start_row)
-
-                outs_at_start = int(start_row.get("outs_when_up")) if start_row.get("outs_when_up") is not None else 0
-                start_base_state = get_base_state_string(start_row.get("on_1b"), start_row.get("on_2b"), start_row.get("on_3b"))
-                end_base_state = get_base_state_string(end_row.get("on_1b"), end_row.get("on_2b"), end_row.get("on_3b")) if end_row.get("events") is None else "000"
-
-                pa_data = {
-                    "plate_appearance_id": pa_id,
-                    "game_pk": int(end_row.get("game_pk")) if end_row.get("game_pk") else None,
-                    "inning": int(end_row.get("inning")) if end_row.get("inning") else 1,
-                    "outs_at_start": outs_at_start,
-                    "batter_id": int(end_row.get("batter")) if end_row.get("batter") else None,
-                    "pitcher_id": int(end_row.get("pitcher")) if end_row.get("pitcher") else None,
-                    "event_result": end_row.get("events"),                       
-                    "rbi_on_play": 0, 
-                    "runs_scored_on_play": 0,
-                    "total_balls": int(end_row.get("balls")) if end_row.get("balls") is not None else 0,
-                    "total_strikes": int(end_row.get("strikes")) if end_row.get("strikes") is not None else 0,
-                    "pitch_count_in_pa": int(end_row.get("pitch_number")) if end_row.get("pitch_number") is not None else 1,
-                    "start_base_state": start_base_state,
-                    "end_base_state": end_base_state
-                }
-                
-                conn.execute(text("""
-                    INSERT INTO plate_appearances (
-                        plate_appearance_id, game_pk, inning, outs_at_start, batter_id, pitcher_id, 
-                        event_result, rbi_on_play, runs_scored_on_play, total_balls, total_strikes, 
-                        pitch_count_in_pa, start_base_state, end_base_state
-                    )
-                    VALUES (
-                        :plate_appearance_id, :game_pk, :inning, :outs_at_start, :batter_id, :pitcher_id, 
-                        :event_result, :rbi_on_play, :runs_scored_on_play, :total_balls, :total_strikes, 
-                        :pitch_count_in_pa, :start_base_state, :end_base_state
-                    )
-                    ON CONFLICT (plate_appearance_id) DO UPDATE SET
-                        event_result = EXCLUDED.event_result,
-                        total_balls = EXCLUDED.total_balls,
-                        total_strikes = EXCLUDED.total_strikes,
-                        pitch_count_in_pa = EXCLUDED.pitch_count_in_pa,
-                        end_base_state = EXCLUDED.end_base_state;
-                """), pa_data)
-                pa_inserted += 1
-
-        # --- STEP 2: POPULATE CHILDREN SECOND (statcast_pitches) ---
-        print("Writing data stream to statcast_pitches...")
-        with engine.begin() as conn:
-            for _, row in df.iterrows():
-                pitch_data = {
-                    "pitch_id": row.get("pitch_id"),
-                    "game_pk": int(row.get("game_pk")) if row.get("game_pk") else None,
-                    "plate_appearance_id": row.get("derived_pa_id"),  
-                    "game_date": row.get("game_date") if row.get("game_date") else start_date,
-                    "pitch_type": row.get("pitch_type"),
-                    "at_bat_number": int(row.get("at_bat_number")) if row.get("at_bat_number") else 0,
-                    "pitch_number": int(row.get("pitch_number")) if row.get("pitch_number") else 0,
-                    "release_velocity": row.get("release_speed"),
-                    "release_spin_rate": row.get("release_spin_rate"),
-                    "release_extension": row.get("release_extension"),
-                    "release_pos_x": row.get("release_pos_x"),
-                    "release_pos_y": row.get("release_pos_y"),
-                    "release_pos_z": row.get("release_pos_z"),
-                    "vx0": row.get("vx0"),
-                    "vy0": row.get("vy0"),
-                    "vz0": row.get("vz0"),
-                    "ax": row.get("ax"),
-                    "ay": row.get("ay"),
-                    "az": row.get("az"),
-                    "effective_speed": row.get("effective_speed"),
-                    "inning": int(row.get("inning")) if row.get("inning") else 1,
-                    "inning_half": row.get("inning_topbot") if row.get("inning_topbot") else "Top",
-                    "outs_before_pitch": int(row.get("outs_when_up")) if row.get("outs_when_up") else 0,
-                    "runner_on_first_id": int(row.get("on_1b")) if row.get("on_1b") else None,
-                    "runner_on_second_id": int(row.get("on_2b")) if row.get("on_2b") else None,
-                    "runner_on_third_id": int(row.get("on_3b")) if row.get("on_3b") else None,
-                    "home_score_before_pitch": int(row.get("home_score")) if row.get("home_score") else 0,
-                    "away_score_before_pitch": int(row.get("away_score")) if row.get("away_score") else 0,
-                    "sz_top": row.get("sz_top"),
-                    "sz_bot": row.get("sz_bot"),
-                    "strike_zone_location": int(row.get("zone")) if row.get("zone") else None,
-                    "batter_id": int(row.get("batter")) if row.get("batter") else None,
-                    "pitcher_id": int(row.get("pitcher")) if row.get("pitcher") else None,
-                    "batter_stance": row.get("stand"),
-                    "pitcher_hand": row.get("p_throws"),
-                    "ball_count": int(row.get("balls")) if row.get("balls") else 0,
-                    "strike_count": int(row.get("strikes")) if row.get("strikes") else 0,
-                    "plate_crossing_x": row.get("plate_x"),
-                    "plate_crossing_z": row.get("plate_z"),
-                    "play_event": row.get("events"),
-                    "play_description": row.get("description")
-                }
-                
-                try:
-                    conn.execute(text("""
-                        INSERT INTO statcast_pitches (
-                            pitch_id, game_pk, plate_appearance_id, game_date, pitch_type, at_bat_number, pitch_number,
-                            release_velocity, release_spin_rate, release_extension, release_pos_x, release_pos_y, release_pos_z,
-                            vx0, vy0, vz0, ax, ay, az, effective_speed, inning, inning_half, outs_before_pitch,
-                            runner_on_first_id, runner_on_second_id, runner_on_third_id, home_score_before_pitch, away_score_before_pitch,
-                            sz_top, sz_bot, strike_zone_location, batter_id, pitcher_id, batter_stance, pitcher_hand,
-                            ball_count, strike_count, plate_crossing_x, plate_crossing_z, play_event, play_description
-                        )
-                        VALUES (
-                            :pitch_id, :game_pk, :plate_appearance_id, :game_date, :pitch_type, :at_bat_number, :pitch_number,
-                            :release_velocity, :release_spin_rate, :release_extension, :release_pos_x, :release_pos_y, :release_pos_z,
-                            :vx0, :vy0, :vz0, :ax, :ay, :az, :effective_speed, :inning, :inning_half, :outs_before_pitch,
-                            :runner_on_first_id, :runner_on_second_id, :runner_on_third_id, :home_score_before_pitch, :away_score_before_pitch,
-                            :sz_top, :sz_bot, :strike_zone_location, :batter_id, :pitcher_id, :batter_stance, :pitcher_hand,
-                            :ball_count, :strike_count, :plate_crossing_x, :plate_crossing_z, :play_event, :play_description
-                        )
-                        ON CONFLICT (pitch_id) DO UPDATE SET
-                            plate_appearance_id = EXCLUDED.plate_appearance_id,
-                            release_velocity = EXCLUDED.release_velocity,
-                            plate_crossing_x = EXCLUDED.plate_crossing_x,
-                            plate_crossing_z = EXCLUDED.plate_crossing_z,
-                            play_event = EXCLUDED.play_event,
-                            play_description = EXCLUDED.play_description;
-                    """), pitch_data)
-                    pitches_inserted += 1
-                except Exception:
-                    continue
-
-        # --- STEP 3: POPULATE BATTED BALL DETAILS LAST (statcast_batted_balls) ---
-        print("Filtering contact tracking elements for statcast_batted_balls...")
-        batted_df = df[df['launch_speed'].notnull() | df['launch_angle'].notnull()]
-
-        with engine.begin() as conn:
-            for _, row in batted_df.iterrows():
-                ev = row.get("launch_speed")
-                la = row.get("launch_angle")
-                
-                # Dynamic calculations for immediate metric backfills
-                is_hard_hit = bool(ev >= 95.0) if ev is not None else None
-                is_sweet_spot = bool(8.0 <= la <= 32.0) if la is not None else None
-                
-                # Convert raw tracking coordinates to true spray angle degrees
-                hc_x = row.get("hc_x")
-                hc_y = row.get("hc_y")
-                calculated_spray = None
-                if hc_x is not None and hc_y is not None:
-                    calculated_spray = round(math.degrees(math.atan2(hc_x - 125, 201 - hc_y)), 2)
-
-                batted_data = {
-                    "pitch_id": row.get("pitch_id"),
-                    "exit_velocity": ev,       
-                    "launch_angle": la,
-                    "hit_distance_feet": int(row.get("hit_distance_sc")) if row.get("hit_distance_sc") else None,
-                    "spray_angle": calculated_spray if calculated_spray is not None else hc_x,                  
-                    "hit_location_x": hc_x, 
-                    "hit_location_y": hc_y, 
-                    "expected_woba": row.get("estimated_woba_using_speedangle"), 
-                    "expected_slugging": row.get("estimated_slg_using_speedangle"),
-                    "is_hard_hit": is_hard_hit,
-                    "is_sweet_spot": is_sweet_spot
-                }
-                
-                try:
-                    conn.execute(text("""
-                        INSERT INTO statcast_batted_balls (
-                            pitch_id, exit_velocity, launch_angle, hit_distance_feet, spray_angle, 
-                            hit_location_x, hit_location_y, expected_woba, expected_slugging, is_hard_hit, is_sweet_spot
-                        )
-                        VALUES (
-                            :pitch_id, :exit_velocity, :launch_angle, :hit_distance_feet, :spray_angle, 
-                            :hit_location_x, :hit_location_y, :expected_woba, :expected_slugging, :is_hard_hit, :is_sweet_spot
-                        )
-                        ON CONFLICT (pitch_id) DO UPDATE SET
-                            exit_velocity = EXCLUDED.exit_velocity,
-                            launch_angle = EXCLUDED.launch_angle,
-                            hit_distance_feet = EXCLUDED.hit_distance_feet,
-                            spray_angle = EXCLUDED.spray_angle,
-                            hit_location_x = EXCLUDED.hit_location_x,
-                            hit_location_y = EXCLUDED.hit_location_y,
-                            expected_woba = EXCLUDED.expected_woba,
-                            expected_slugging = EXCLUDED.expected_slugging,
-                            is_hard_hit = EXCLUDED.is_hard_hit,
-                            is_sweet_spot = EXCLUDED.is_sweet_spot;
-                    """), batted_data)
-                    batted_balls_inserted += 1
-                except Exception:
-                    continue
-
-        print(f"Statcast execution finished: Saved {pitches_inserted} pitches, {pa_inserted} plate appearances, and {batted_balls_inserted} batted balls successfully.")
-        
+        df = statcast_date_range(start_dt=start_date, end_dt=end_date)
     except Exception as e:
-        print(f"Statcast failed: {e}")
-        pass
+        print(f"Track data range payload extract issue: {e}")
+        return
 
-if __name__ == "__main__":
-    s_date = sys.argv[1] if len(sys.argv) > 1 else None
-    e_date = sys.argv[2] if len(sys.argv) > 2 else s_date
-    run(s_date, e_date)
+    if df is None or df.empty:
+        print("Empty statcast sequence encountered across date query windows.")
+        return
+
+    print(f"Parsing {len(df)} telemetry stream entries for ingestion schema...")
+    
+    # Fill defaults/safeties to prevent execution parsing errors
+    df['launch_speed'] = pd.to_numeric(df['launch_speed'], errors='coerce')
+    df['launch_angle'] = pd.to_numeric(df['launch_angle'], errors='coerce')
+    df['hit_distance_sc'] = pd.to_numeric(df['hit_distance_sc'], errors='coerce')
+
+    with engine.begin() as conn:
+        for _, row in df.iterrows():
+            try:
+                # Direct lookup insertion strategy matches our clean 7-table design
+                conn.execute(text("""
+                    INSERT INTO statcast_pitches (
+                        game_pk, game_date, plate_appearance_number, at_bat_number, pitch_number, inning, inning_half, outs,
+                        ball_count, strike_count, batter_id, pitcher_id, pitch_type, release_velocity, release_spin_rate,
+                        release_extension, release_pos_x, release_pos_y, release_pos_z, vx0, vy0, vz0, ax, ay, az, effective_speed,
+                        plate_crossing_x, plate_crossing_z, sz_top, sz_bot, runner_on_first, runner_on_second, runner_on_third,
+                        home_score, away_score, play_event, play_description,
+                        exit_velocity, launch_angle, hit_distance, spray_angle, hit_location_x, hit_location_y, expected_woba, expected_slugging, is_hard_hit, is_sweet_spot
+                    ) VALUES (
+                        :game_pk, :game_date, :pa_num, :ab_num, :pitch_num, :inn, :half, :outs, :balls, :strikes, :bat_id, :pit_id, :p_type, :vel, :spin,
+                        :ext, :p_x, :p_y, :p_z, :vx, :vy, :vz, :ax, :ay, :az, :eff_v, :px_x, :px_z, :sz_t, :sz_b, :on_1b, :on_2b, :on_3b,
+                        :h_score, :a_score, :event, :desc,
+                        :ev, :la, :dist, :spray, :loc_x, :loc_y, :xwoba, :xslug, :hard_hit, :sweet_spot
+                    ) ON CONFLICT (game_pk, at_bat_number, pitch_number) DO NOTHING;
+                """), {
+                    "game_pk": int(row['game_pk']), "game_date": pd.to_datetime(row['game_date']).date(),
+                    "pa_num": int(row.get('at_bat_number', 0)), "ab_num": int(row.get('at_bat_number', 0)),
+                    "pitch_num": int(row.get('pitch_number', 0)), "inn": int(row['inning']), "half": row['inning_topbot'],
+                    "outs": int(row['outs_when_up']), "balls": int(row['balls']), "strikes": int(row['strikes']),
+                    "bat_id": int(row['batter']), "pit_id": int(row['pitcher']), "p_type": row['pitch_type'],
+                    "vel": row['release_speed'], "spin": row['release_spin_rate'] if pd.notna(row['release_spin_rate']) else None,
+                    "ext": row['release_extension'] if pd.notna(row['release_extension']) else None,
+                    "p_x": row['release_pos_x'], "p_y": row['release_pos_y'], "p_z": row['release_pos_z'],
+                    "vx": row['vx0'], "vy": row['vy0'], "vz": row['vz0'], "ax": row['ax'], "ay": row['ay'], "az": row['az'],
+                    "eff_v": row['effective_speed'] if pd.notna(row['effective_speed']) else None,
+                    "px_x": row['plate_x'], "px_z": row['plate_z'], "sz_t": row['sz_top'], "sz_b": row['sz_bot'],
+                    "on_1b": pd.notna(row['on_1b']), "on_2b": pd.notna(row['on_2b']), "on_3b": pd.notna(row['on_3b']),
+                    "h_score": int(row['home_score']), "a_score": int(row['away_score']), "event": row['events'], "desc": row['des'],
+                    "ev": row['launch_speed'] if pd.notna(row['launch_speed']) else None,
+                    "la": row['launch_angle'] if pd.notna(row['launch_angle']) else None,
+                    "dist": row['hit_distance_sc'] if pd.notna(row['hit_distance_sc']) else None,
+                    "spray": None, "loc_x": row['hc_x'] if pd.notna(row['hc_x']) else None, "loc_y": row['hc_y'] if pd.notna(row['hc_y']) else None,
+                    "xwoba": row['estimated_woba_using_speedangle'] if pd.notna(row['estimated_woba_using_speedangle']) else None,
+                    "xslug": row['estimated_slg_using_speedangle'] if pd.notna(row['estimated_slg_using_speedangle']) else None,
+                    "hard_hit": row['launch_speed'] >= 95.0 if pd.notna(row['launch_speed']) else None,
+                    "sweet_spot": (row['launch_angle'] >= 8.0) & (row['launch_angle'] <= 32.0) if pd.notna(row['launch_angle']) and pd.notna(row['launch_speed']) else None
+                })
+            except Exception as item_err:
+                continue
+    print("Statcast pitches data pipeline processing completed successfully.")
