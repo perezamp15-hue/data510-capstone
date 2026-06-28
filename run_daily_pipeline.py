@@ -43,19 +43,16 @@ def populate_downstream_team_tables(target_date):
     engine = get_engine()
     
     with engine.begin() as conn:
-        # Check if hits/errors columns exist in your games table to select them safely
         games_cols_res = conn.execute(text("""
             SELECT column_name FROM information_schema.columns WHERE table_name = 'games'
         """)).fetchall()
         games_cols = {row[0] for row in games_cols_res}
         
-        # Build dynamic select fields based on what columns your games table has
         h_hits_field = 'home_hits' if 'home_hits' in games_cols else 'home_score'
         a_hits_field = 'away_hits' if 'away_hits' in games_cols else 'away_score'
         h_err_field = 'home_errors' if 'home_errors' in games_cols else '0'
         a_err_field = 'away_errors' if 'away_errors' in games_cols else '0'
         
-        # Fetch the games recorded for this date with hit/error fallback mapping
         query = text(f"""
             SELECT game_pk, season, home_team_id, away_team_id, home_score, away_score, game_type,
                    {h_hits_field}, {a_hits_field}, {h_err_field}, {a_err_field}
@@ -66,7 +63,6 @@ def populate_downstream_team_tables(target_date):
         for g in games:
             pk, season, home_id, away_id, h_score, a_score, g_type, h_hits, a_hits, h_err, a_err = g
             
-            # Direct fallbacks to satisfy NOT NULL constraints
             h_score = h_score if h_score is not None else 0
             a_score = a_score if a_score is not None else 0
             h_hits = h_hits if h_hits is not None else 0
@@ -74,19 +70,15 @@ def populate_downstream_team_tables(target_date):
             h_err = h_err if h_err is not None else 0
             a_err = a_err if a_err is not None else 0
             
-            # 1. Populate team_schedules 
             conn.execute(text("""
                 INSERT INTO team_schedules (game_pk, season_year, game_type)
                 VALUES (:pk, :season_year, :g_type)
                 ON CONFLICT (game_pk) DO NOTHING;
             """), {"pk": pk, "season_year": season, "g_type": g_type})
             
-            # Calculate win/loss strings
             home_result = 'W' if h_score > a_score else 'L'
             away_result = 'L' if h_score > a_score else 'W'
             
-            # 2. Populate team_games entries (Including hits and errors to fulfill constraints)
-            # Home side entry
             conn.execute(text("""
                 INSERT INTO team_games (game_pk, team_id, is_home, runs, hits, errors, game_result)
                 VALUES (:pk, :team_id, :is_home, :runs, :hits, :errors, :game_result)
@@ -100,7 +92,6 @@ def populate_downstream_team_tables(target_date):
                 "runs": h_score, "hits": h_hits, "errors": h_err, "game_result": home_result
             })
             
-            # Away side entry
             conn.execute(text("""
                 INSERT INTO team_games (game_pk, team_id, is_home, runs, hits, errors, game_result)
                 VALUES (:pk, :team_id, :is_home, :runs, :hits, :errors, :game_result)
@@ -115,6 +106,7 @@ def populate_downstream_team_tables(target_date):
             })
             
     print("Downstream team performance matrices generated successfully with zero null violations.")
+
 def run_pipeline_for_date(target_date=None):
     if not target_date:
         local_tz = pytz.timezone('America/Los_Angeles')
@@ -124,14 +116,29 @@ def run_pipeline_for_date(target_date=None):
     print(f"RUNNING CRON-READY PIPELINE FOR: {target_date}")
     print(f"=========================================\n")
     
-    print("--- Phase 1: Syncing Core Indices ---")
+    current_year = target_date.split("-")[0]
+    engine = get_engine()
+    
+    print(f"--- Phase 1: Syncing Core Indices for {current_year} ---")
     try:
         run_strict_script("scrape_teams.py")
         run_strict_script("scrape_park_info.py")
-        run_strict_script("scrape_schedule.py", "2026")
-        run_strict_script("scrape_rosters.py")
+        run_strict_script("scrape_schedule.py", current_year)
+        run_strict_script("scrape_rosters.py", current_year)
     except subprocess.CalledProcessError:
         sys.exit(1)
+
+    # NEW ESCAPE HATCH: Check if there are any valid official games in our DB for this date
+    with engine.connect() as conn:
+        res = conn.execute(text("SELECT COUNT(*) FROM games WHERE game_date = :date"), {"date": target_date})
+        game_count = res.scalar() or 0
+
+    if game_count == 0:
+        print(f"\nSkipping daily telemetry: 0 official MLB games scheduled on {target_date}.")
+        print(f"Pipeline execution successfully finished for window: {target_date}")
+        return
+
+    print(f"\nFound {game_count} scheduled official games. Proceeding with details...")
 
     print("\n--- Phase 2: Ingesting Daily Game Feeds ---")
     try: scrape_game_feed.run(target_date)

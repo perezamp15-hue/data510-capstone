@@ -44,6 +44,13 @@ def run():
     try:
         api_data = fetch_api_json(mlb_venue_url)
         venues = api_data.get('venues', [])
+        print(f"Returned {len(venues)} venues from API")
+
+        ids = sorted(v["id"] for v in venues)
+
+        print(f"Min venue ID: {ids[0]}")
+        print(f"Max venue ID: {ids[-1]}")
+        print(ids[-20:])
     except Exception:
         venues = []
 
