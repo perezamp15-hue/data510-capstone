@@ -11,17 +11,13 @@ def run(target_date):
     
     url = f"https://statsapi.mlb.com/api/v1/schedule/games/?sportId=1&date={target_date}"
     dates = requests.get(url).json().get('dates', [])
-    if not dates:
-        print("No matches scheduled on this date window.")
-        return
+    if not dates: return
 
     with engine.begin() as conn:
         for date_node in dates:
             for g in date_node.get('games', []):
                 game_pk = g['gamePk']
-                status = g.get('status', {}).get('abstractGameState', '')
-                if status != 'Final':
-                    continue
+                if g.get('status', {}).get('abstractGameState', '') != 'Final': continue
 
                 temp, sky, wind_spd, wind_direction = None, None, None, None
                 hp_id, fb_id, sb_id, tb_id = None, None, None, None
@@ -37,22 +33,16 @@ def run(target_date):
                 is_home_team_win = home_score > away_score
                 winning_team_id = home_team_id if is_home_team_win else away_team_id
 
-                box_url = f"https://statsapi.mlb.com/api/v1/game/{game_pk}/boxscore"
                 try:
-                    box_res = requests.get(box_url)
-                    if box_res.status_code == 200:
-                        officials_list = box_res.json().get('officials', [])
-                except:
-                    pass
+                    box_res = requests.get(f"https://statsapi.mlb.com/api/v1/game/{game_pk}/boxscore")
+                    if box_res.status_code == 200: officials_list = box_res.json().get('officials', [])
+                except: pass
 
                 try:
-                    live_url = f"http://statsapi.mlb.com/api/v1.1/game/{game_pk}/feed/live"
-                    live_res = requests.get(live_url)
+                    live_res = requests.get(f"http://statsapi.mlb.com/api/v1.1/game/{game_pk}/feed/live")
                     if live_res.status_code == 200:
                         live_data = live_res.json()
-                        
-                        if not officials_list:
-                            officials_list = live_data.get('liveData', {}).get('boxscore', {}).get('officials', [])
+                        if not officials_list: officials_list = live_data.get('liveData', {}).get('boxscore', {}).get('officials', [])
                         
                         weather_block = live_data.get('gameData', {}).get('weather', {})
                         raw_temp = weather_block.get('temp')
@@ -66,20 +56,16 @@ def run(target_date):
                         if wind_raw:
                             wind_lower = wind_raw.lower()
                             if "roof closed" in wind_lower or "indoors" in wind_lower:
-                                wind_spd = 0
-                                wind_direction = "INDOORS"
-                                sky = "INDOORS"
+                                wind_spd, wind_direction, sky = 0, "INDOORS", "INDOORS"
                             elif "mph" in wind_lower:
                                 left_side, right_side = wind_lower.split("mph", 1)
                                 speed_digits = re.findall(r'\d+', left_side)
-                                if speed_digits:
-                                    wind_spd = int(speed_digits[-1])
+                                if speed_digits: wind_spd = int(speed_digits[-1])
                                 direction_clean = right_side.replace('.', '').replace(',', '').strip().upper()
                                 wind_direction = direction_clean if direction_clean else "CALM"
                 except Exception as e:
-                    print(f"Live feed weather extraction failed for game {game_pk}: {e}")
-                    wind_spd = 0
-                    wind_direction = "UNKNOWN"
+                    print(f"Weather extraction skipped for game {game_pk}: {e}")
+                    wind_spd, wind_direction = 0, "UNKNOWN"
 
                 for off in officials_list:
                     oid = off.get('official', {}).get('id')
@@ -93,11 +79,10 @@ def run(target_date):
                     elif role == 'Second Base': sb_id = oid
                     elif role == 'Third Base': tb_id = oid
 
-                # MOVED UP: Parse timestamp variables first so they are defined for the queries below
+                # Scoping checkpoint configuration
                 start_time = g.get('gameDate')
                 start_dt = datetime.strptime(start_time, "%Y-%m-%dT%H:%M:%SZ") if start_time else None
 
-                # JIT PARK SAFETY NET
                 if g.get('venue', {}).get('id'):
                     venue_node = g.get('venue', {})
                     p_id = venue_node.get('id')
@@ -107,10 +92,8 @@ def run(target_date):
                     if not park_exists:
                         try:
                             conn.execute(text("INSERT INTO public.parks (park_id, park_name, elevation) VALUES (:id, :name, 500) ON CONFLICT (park_id) DO NOTHING;"), {"id": p_id, "name": p_name})
-                        except Exception as e:
-                            print(f"Safe-skipping parallel race condition: {e}")
+                        except Exception as e: pass
 
-                # Populate public.games Warehouse Schema
                 conn.execute(text("""
                     INSERT INTO public.games (
                         game_pk, game_date, season, game_type, scheduled_start, park_id, home_team_id, away_team_id,
