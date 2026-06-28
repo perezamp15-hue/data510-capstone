@@ -1,4 +1,5 @@
 import sys
+import re
 import requests
 from datetime import datetime
 from sqlalchemy import text
@@ -25,13 +26,21 @@ def run(target_date):
                 # Initialize defaults
                 temp, sky, wind_spd, wind_direction = None, None, None, None
                 hp_id, fb_id, sb_id, tb_id = None, None, None, None
-                win_id, lose_id, save_id = None, None, None
                 officials_list = []
                 
-                # Check for Doubleheaders properly ('Y' or 'S' mean it's part of a DH)
                 dh_flag = g.get('doubleHeader') in ['Y', 'S']
 
-                # Try standard boxscore endpoint for weather matrices
+                # 1. Team-level Win Determinations
+                teams = g.get('teams', {})
+                home_team_id = teams.get('home', {}).get('team', {}).get('id')
+                away_team_id = teams.get('away', {}).get('team', {}).get('id')
+                home_score = teams.get('home', {}).get('score', 0)
+                away_score = teams.get('away', {}).get('score', 0)
+                
+                is_home_team_win = home_score > away_score
+                winning_team_id = home_team_id if is_home_team_win else away_team_id
+
+                # 2. Try standard boxscore endpoint for weather matrices
                 box_url = f"https://statsapi.mlb.com/api/v1/game/{game_pk}/boxscore"
                 box_res = requests.get(box_url)
                 
@@ -45,38 +54,37 @@ def run(target_date):
                     
                     if weather_str:
                         try:
-                            parts = weather_str.split(',')
-                            if len(parts) >= 1:
-                                temp = int(''.join(filter(str.isdigit, parts[0])))
-                            if len(parts) >= 2:
-                                sub_parts = parts[1].split('.')
-                                sky = sub_parts[0].replace('Sky', '').strip()
-                                wind_segment = next((p for p in parts if 'Wind' in p or 'wind' in p), '')
-                                if not wind_segment and len(sub_parts) > 1:
-                                    wind_segment = next((p for p in sub_parts if 'Wind' in p or 'wind' in p), '')
-                                if wind_segment:
-                                    wind_clean = wind_segment.lower().replace('wind', '').replace('mph', '').strip()
-                                    wind_spd = int(''.join(filter(str.isdigit, wind_clean.split()[0])))
-                                    if 'to' in wind_clean or 'from' in wind_clean or 'in' in wind_clean:
-                                        wind_direction = wind_clean.split(' ', 1)[1].strip().upper()
-                        except:
-                            pass
+                            # Parse Temperature
+                            temp_match = re.search(r'(\d+)\s*degrees', weather_str, re.IGNORECASE)
+                            if temp_match:
+                                temp = int(temp_match.group(1))
+                            
+                            # Parse Sky Condition
+                            sky_match = re.search(r'degrees,\s*([^.]+)\.', weather_str, re.IGNORECASE)
+                            if sky_match:
+                                sky = sky_match.group(1).strip()
+                            
+                            # Regex-based Wind Parser
+                            # Handles patterns like: "Wind 5 mph In From CF", "Wind 0 mph", "Wind 12 mph Out To LF"
+                            wind_match = re.search(r'Wind\s*(\d+)\s*mph\s*(.*)', weather_str, re.IGNORECASE)
+                            if wind_match:
+                                wind_spd = int(wind_match.group(1))
+                                dir_text = wind_match.group(2).strip().upper()
+                                wind_direction = dir_text if dir_text else "CALM"
+                            elif "Roof Closed" in weather_str or "Indoors" in weather_str:
+                                wind_spd = 0
+                                wind_direction = "INDOORS"
+                        except Exception as e:
+                            print(f"Weather parser skipped row formatting on game {game_pk}: {e}")
 
-                # Deep fetch live data to extract pitcher decisions cleanly
-                try:
-                    live_url = f"https://statsapi.mlb.com/api/v1/game/{game_pk}/feed/live"
-                    live_data = requests.get(live_url).json()
-                    
-                    if not officials_list:
+                # Fallback to Live Feed for missing officials
+                if not officials_list:
+                    try:
+                        live_url = f"https://statsapi.mlb.com/api/v1/game/{game_pk}/feed/live"
+                        live_data = requests.get(live_url).json()
                         officials_list = live_data.get('liveData', {}).get('boxscore', {}).get('officials', [])
-                    
-                    # Target liveData game records directly
-                    live_decisions = live_data.get('gameData', {}).get('decisions', {})
-                    win_id = live_decisions.get('winner', {}).get('id')
-                    lose_id = live_decisions.get('loser', {}).get('id')
-                    save_id = live_decisions.get('save', {}).get('id')
-                except:
-                    pass
+                    except:
+                        pass
 
                 # Parse and seed game officials
                 for off in officials_list:
@@ -94,24 +102,22 @@ def run(target_date):
                     elif role == 'Second Base': sb_id = oid
                     elif role == 'Third Base': tb_id = oid
 
-                teams = g.get('teams', {})
                 start_time = g.get('gameDate')
                 start_dt = datetime.strptime(start_time, "%Y-%m-%dT%H:%M:%SZ") if start_time else None
 
                 conn.execute(text("""
                     INSERT INTO games (
                         game_pk, game_date, season, game_type, scheduled_start, park_id, home_team_id, away_team_id,
-                        home_score, away_score, winning_pitcher_id, losing_pitcher_id, save_pitcher_id, day_night_type, is_doubleheader,
+                        home_score, away_score, winning_team_id, is_home_team_win, day_night_type, is_doubleheader,
                         temperature_f, sky_condition, wind_speed_mph, wind_direction, home_plate_ump_id, first_base_ump_id, second_base_ump_id, third_base_ump_id
                     ) VALUES (
-                        :game_pk, :game_date, :season, :game_type, :start, :park, :home, :away, :h_score, :a_score, :win, :lose, :save, :dn, :dh,
+                        :game_pk, :game_date, :season, :game_type, :start, :park, :home, :away, :h_score, :a_score, :win_team, :is_home_win, :dn, :dh,
                         :temp, :sky, :w_spd, :w_dir, :hp, :fb, :sb, :tb
                     ) ON CONFLICT (game_pk) DO UPDATE SET
                         home_score = EXCLUDED.home_score, 
                         away_score = EXCLUDED.away_score,
-                        winning_pitcher_id = EXCLUDED.winning_pitcher_id,
-                        losing_pitcher_id = EXCLUDED.losing_pitcher_id,
-                        save_pitcher_id = EXCLUDED.save_pitcher_id,
+                        winning_team_id = EXCLUDED.winning_team_id,
+                        is_home_team_win = EXCLUDED.is_home_team_win,
                         is_doubleheader = EXCLUDED.is_doubleheader,
                         temperature_f = EXCLUDED.temperature_f, 
                         sky_condition = EXCLUDED.sky_condition,
@@ -124,9 +130,8 @@ def run(target_date):
                 """), {
                     "game_pk": game_pk, "game_date": datetime.strptime(target_date, "%Y-%m-%d").date(), "season": g.get('season', 2023),
                     "game_type": g.get('gameType', 'R'), "start": start_dt, "park": g.get('venue', {}).get('id'),
-                    "home": teams.get('home', {}).get('team', {}).get('id'), "away": teams.get('away', {}).get('team', {}).get('id'),
-                    "h_score": teams.get('home', {}).get('score'), "a_score": teams.get('away', {}).get('score'),
-                    "win": win_id, "lose": lose_id, "save": save_id, "dn": g.get('dayNight'), "dh": dh_flag,
+                    "home": home_team_id, "away": away_team_id, "h_score": home_score, "a_score": away_score,
+                    "win_team": winning_team_id, "is_home_win": is_home_team_win, "dn": g.get('dayNight'), "dh": dh_flag,
                     "temp": temp, "sky": sky, "w_spd": wind_spd, "w_dir": wind_direction, "hp": hp_id, "fb": fb_id, "sb": sb_id, "tb": tb_id
                 })
     print(f"Core games mapping entries finalized for date window: {target_date}")
