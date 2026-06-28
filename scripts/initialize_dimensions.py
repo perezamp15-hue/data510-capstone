@@ -27,15 +27,46 @@ def seed_static_dimensions():
             })
 
         # 2. Venues Sync
-        print("Synchronizing master park profiles...")
+        # 2. Venues Sync (Upgraded for deep metadata extraction!)
+        print("Synchronizing master park profiles with full environmental data...")
         url = "https://statsapi.mlb.com/api/v1/venues?sportId=1"
         venues = requests.get(url).json().get('venues', [])
+        
         for v in venues:
+            park_id = v['id']
+            park_name = v['name']
+            
+            # Default values if field lookups fail
+            lat, lon, elev, surface, roof = None, None, None, None, None
+            
+            # Hit the individual venue endpoint to grab the missing details
+            try:
+                detail_url = f"https://statsapi.mlb.com/api/v1/venues/{park_id}"
+                v_detail = requests.get(detail_url).json().get('venues', [{}])[0]
+                
+                # Dig through the response keys safely
+                lat = v_detail.get('location', {}).get('latitude')
+                lon = v_detail.get('location', {}).get('longitude')
+                elev = v_detail.get('location', {}).get('elevation')
+                surface = v_detail.get('fieldInfo', {}).get('surfaceType')
+                roof = v_detail.get('fieldInfo', {}).get('roofType')
+            except Exception as e:
+                # Fallback gently if a venue profile is missing details
+                pass
+
             conn.execute(text("""
                 INSERT INTO parks (park_id, park_name, latitude, longitude, elevation, surface_type, roof_style)
-                VALUES (:id, :name, NULL, NULL, NULL, NULL, NULL)
-                ON CONFLICT (park_id) DO NOTHING;
-            """), {"id": v['id'], "name": v['name']})
+                VALUES (:id, :name, :lat, :lon, :elev, :surface, :roof)
+                ON CONFLICT (park_id) DO UPDATE SET
+                    latitude = EXCLUDED.latitude,
+                    longitude = EXCLUDED.longitude,
+                    elevation = EXCLUDED.elevation,
+                    surface_type = EXCLUDED.surface_type,
+                    roof_style = EXCLUDED.roof_style;
+            """), {
+                "id": park_id, "name": park_name, "lat": lat, "lon": lon, 
+                "elev": elev, "surface": surface, "roof": roof
+            })
 
         # 3. Players Initial Load
         print("Fetching operational baseline players framework...")
