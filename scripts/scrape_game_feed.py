@@ -27,7 +27,7 @@ def run(target_date):
                 temp, sky, wind_spd, wind_direction = None, None, None, None
                 hp_id, fb_id, sb_id, tb_id = None, None, None, None
                 officials_list = []
-                weather_str = ""
+                weather_string = None
                 
                 dh_flag = g.get('doubleHeader') in ['Y', 'S']
 
@@ -41,77 +41,65 @@ def run(target_date):
                 is_home_team_win = home_score > away_score
                 winning_team_id = home_team_id if is_home_team_win else away_team_id
 
-                # 2. Try standard boxscore endpoint for baseline officials list
+                # 2. Extract Weather Payload and Officials from the Boxscore Endpoint
                 box_url = f"https://statsapi.mlb.com/api/v1/game/{game_pk}/boxscore"
                 try:
                     box_res = requests.get(box_url)
                     if box_res.status_code == 200:
                         box_data = box_res.json()
                         officials_list = box_data.get('officials', [])
-                        info_list = box_data.get('info', [])
-                        weather_node = next((i for i in info_list if i.get('label') == 'Weather'), None)
-                        if weather_node:
-                            weather_str = weather_node.get('value', '')
-                except:
-                    pass
-
-                # 3. HISTORICAL ARCHIVE LOOKUP: Pull the live feed endpoint for explicit weather fields
-                try:
-                    live_url = f"https://statsapi.mlb.com/api/v1/game/{game_pk}/feed/live"
-                    live_res = requests.get(live_url)
-                    
-                    if live_res.status_code == 200:
-                        live_data = live_res.json()
                         
-                        if not officials_list:
-                            officials_list = live_data.get('liveData', {}).get('boxscore', {}).get('officials', [])
-                        
-                        game_data_node = live_data.get('gameData', {})
-                        weather_block = game_data_node.get('weather', {})
-                        
-                        if weather_block:
-                            if weather_block.get('temp'):
-                                temp = int(weather_block.get('temp'))
-                            if weather_block.get('condition'):
-                                sky = weather_block.get('condition')
-                            if weather_block.get('wind'):
-                                weather_str = weather_block.get('wind', '')
+                        # Loop through info array to find the Weather label
+                        for item in box_data.get('info', []):
+                            if item.get('label') == 'Weather':
+                                weather_string = item.get('value')
                 except Exception as e:
-                    print(f"Live feed deep lookup skipped for game {game_pk}: {e}")
+                    print(f"Boxscore check skipped for game {game_pk}: {e}")
 
-                # 4Substring Wind Splitter Engine
-                if weather_str:
+                # 3. Production Weather String Split Engine
+                if weather_string:
                     try:
-                        weather_lower = weather_str.lower()
+                        # Parse Temperature
+                        temp_match = re.search(r"(\d+)\s*degrees", weather_string, re.IGNORECASE)
+                        temp = int(temp_match.group(1)) if temp_match else None
+
+                        # Parse Sky Condition (split down the first comma, clip at the first period)
+                        parts = weather_string.split(',', 1)
+                        sky = parts[1].split('.')[0].strip() if len(parts) > 1 else "Unknown"
+
+                        # Parse Wind Metrics safely without breaking on punctuation changes
+                        weather_lower = weather_string.lower()
                         
                         if "roof closed" in weather_lower or "indoors" in weather_lower:
                             wind_spd = 0
                             wind_direction = "INDOORS"
+                            sky = "INDOORS"
                         elif "mph" in weather_lower:
+                            # Split string right down the middle at "mph"
                             left_side, right_side = weather_lower.split("mph", 1)
+                            
+                            # Grab the last numeric sequence to the left of "mph"
                             speed_digits = re.findall(r'\d+', left_side)
                             if speed_digits:
                                 wind_spd = int(speed_digits[-1])
                             
-                            dir_text = right_side.replace('.', '').replace(',', '').strip().upper()
-                            wind_direction = dir_text if dir_text else "CALM"
+                            # Clean up the trailing data vector to the right of "mph"
+                            direction_clean = right_side.replace('.', '').replace(',', '').strip().upper()
+                            wind_direction = direction_clean if direction_clean else "CALM"
                         else:
-                            speed_digits = re.findall(r'\d+', weather_lower)
-                            if speed_digits:
-                                wind_spd = int(speed_digits[0])
-                                wind_direction = weather_lower.replace(str(wind_spd), '').strip().upper()
-                            else:
-                                wind_spd = 0
-                                wind_direction = "CALM"
-                    except:
+                            # Fallback for structural outliers
+                            wind_spd = 0
+                            wind_direction = "CALM"
+                    except Exception as e:
+                        print(f"Weather parser skipped row formatting on game {game_pk}: {e}")
                         wind_spd = 0
-                        wind_direction = "CALM"
+                        wind_direction = "UNKNOWN"
                 else:
-                    if not wind_spd:
-                        wind_spd = 0
-                        wind_direction = "CALM"
+                    # Default values if API text data is completely null
+                    wind_spd = 0
+                    wind_direction = "CALM"
 
-                # Parse and seed game officials
+                # 4. Parse and Seed Game Officials
                 for off in officials_list:
                     oid = off.get('official', {}).get('id')
                     oname = off.get('official', {}).get('fullName', 'Unknown Umpire')
@@ -130,6 +118,7 @@ def run(target_date):
                 start_time = g.get('gameDate')
                 start_dt = datetime.strptime(start_time, "%Y-%m-%dT%H:%M:%SZ") if start_time else None
 
+                # 5. Populate Data Warehouse Fields
                 conn.execute(text("""
                     INSERT INTO games (
                         game_pk, game_date, season, game_type, scheduled_start, park_id, home_team_id, away_team_id,
