@@ -54,26 +54,29 @@ def run(target_date):
                     
                     if weather_str:
                         try:
-                            # Parse Temperature
+                            # 1. Temperature (e.g., "72 degrees")
                             temp_match = re.search(r'(\d+)\s*degrees', weather_str, re.IGNORECASE)
                             if temp_match:
                                 temp = int(temp_match.group(1))
                             
-                            # Parse Sky Condition
-                            sky_match = re.search(r'degrees,\s*([^.]+)\.', weather_str, re.IGNORECASE)
-                            if sky_match:
-                                sky = sky_match.group(1).strip()
+                            # 2. Sky Condition - Split by comma, extract second block safely
+                            # String shape: "72 degrees, Sunny. Wind 5 mph..." -> ["72 degrees", " Sunny. Wind 5 mph..."]
+                            parts = weather_str.split(',', 1)
+                            if len(parts) > 1:
+                                # Isolate just the text up to the first period: " Sunny"
+                                sky = parts[1].split('.')[0].strip()
                             
-                            # Regex-based Wind Parser
-                            # Handles patterns like: "Wind 5 mph In From CF", "Wind 0 mph", "Wind 12 mph Out To LF"
-                            wind_match = re.search(r'Wind\s*(\d+)\s*mph\s*(.*)', weather_str, re.IGNORECASE)
-                            if wind_match:
-                                wind_spd = int(wind_match.group(1))
-                                dir_text = wind_match.group(2).strip().upper()
-                                wind_direction = dir_text if dir_text else "CALM"
-                            elif "Roof Closed" in weather_str or "Indoors" in weather_str:
+                            # 3. Wind Parser (Searches the entire string completely independently)
+                            if "Roof Closed" in weather_str or "Indoors" in weather_str:
                                 wind_spd = 0
                                 wind_direction = "INDOORS"
+                            else:
+                                wind_match = re.search(r'Wind\s*(\d+)\s*mph\s*,?\s*(.*)', weather_str, re.IGNORECASE)
+                                if wind_match:
+                                    wind_spd = int(wind_match.group(1))
+                                    # Clean up trailing content if there's an additional period
+                                    dir_text = wind_match.group(2).split('.')[0].strip().upper()
+                                    wind_direction = dir_text if dir_text else "CALM"
                         except Exception as e:
                             print(f"Weather parser skipped row formatting on game {game_pk}: {e}")
 
