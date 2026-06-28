@@ -54,32 +54,43 @@ def run(target_date):
                     
                     if weather_str:
                         try:
-                            # 1. Temperature (e.g., "72 degrees")
+                            # 1. Parse Temperature
                             temp_match = re.search(r'(\d+)\s*degrees', weather_str, re.IGNORECASE)
                             if temp_match:
                                 temp = int(temp_match.group(1))
                             
-                            # 2. Sky Condition - Split by comma, extract second block safely
-                            # String shape: "72 degrees, Sunny. Wind 5 mph..." -> ["72 degrees", " Sunny. Wind 5 mph..."]
+                            # 2. Parse Sky Condition
                             parts = weather_str.split(',', 1)
                             if len(parts) > 1:
-                                # Isolate just the text up to the first period: " Sunny"
                                 sky = parts[1].split('.')[0].strip()
                             
-                            # 3. Wind Parser (Searches the entire string completely independently)
-                            if "Roof Closed" in weather_str or "Indoors" in weather_str:
+                            # 3. Bulletproof Wind & Direction Parser
+                            weather_lower = weather_str.lower()
+                            
+                            if "roof closed" in weather_lower or "indoors" in weather_lower:
                                 wind_spd = 0
                                 wind_direction = "INDOORS"
+                            elif "mph" in weather_lower:
+                                # Split the string by "mph" to isolate both sides
+                                # e.g., "72 degrees, sunny. wind 5 mph out to cf" 
+                                # -> left: "... wind 5 ", right: " out to cf"
+                                left_side, right_side = weather_lower.split("mph", 1)
+                                
+                                # Extract the last number sequence on the left side for wind speed
+                                speed_digits = re.findall(r'\d+', left_side)
+                                if speed_digits:
+                                    wind_spd = int(speed_digits[-1])
+                                
+                                # Clean up everything on the right side for the wind direction vector
+                                dir_text = right_side.replace('.', '').strip().upper()
+                                wind_direction = dir_text if dir_text else "CALM"
                             else:
-                                wind_match = re.search(r'Wind\s*(\d+)\s*mph\s*,?\s*(.*)', weather_str, re.IGNORECASE)
-                                if wind_match:
-                                    wind_spd = int(wind_match.group(1))
-                                    # Clean up trailing content if there's an additional period
-                                    dir_text = wind_match.group(2).split('.')[0].strip().upper()
-                                    wind_direction = dir_text if dir_text else "CALM"
+                                # Catch-all fallback for zero wind scenarios
+                                wind_spd = 0
+                                wind_direction = "CALM"
+                                
                         except Exception as e:
                             print(f"Weather parser skipped row formatting on game {game_pk}: {e}")
-
                 # Fallback to Live Feed for missing officials
                 if not officials_list:
                     try:
