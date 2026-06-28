@@ -27,7 +27,6 @@ def seed_static_dimensions():
             })
 
         # 2. Venues Sync
-        # 2. Venues Sync (Upgraded for deep metadata extraction!)
         print("Synchronizing master park profiles with full environmental data...")
         url = "https://statsapi.mlb.com/api/v1/venues?sportId=1"
         venues = requests.get(url).json().get('venues', [])
@@ -36,22 +35,23 @@ def seed_static_dimensions():
             park_id = v['id']
             park_name = v['name']
             
-            # Default values if field lookups fail
             lat, lon, elev, surface, roof = None, None, None, None, None
             
-            # Hit the individual venue endpoint to grab the missing details
             try:
                 detail_url = f"https://statsapi.mlb.com/api/v1/venues/{park_id}"
-                v_detail = requests.get(detail_url).json().get('venues', [{}])[0]
+                res = requests.get(detail_url).json().get('venues', [{}])[0]
                 
-                # Dig through the response keys safely
-                lat = v_detail.get('location', {}).get('latitude')
-                lon = v_detail.get('location', {}).get('longitude')
-                elev = v_detail.get('location', {}).get('elevation')
-                surface = v_detail.get('fieldInfo', {}).get('surfaceType')
-                roof = v_detail.get('fieldInfo', {}).get('roofType')
+                # MLB nests location parameters inside a dictionary node
+                loc = res.get('location', {})
+                lat = loc.get('latitude')
+                lon = loc.get('longitude')
+                elev = loc.get('elevation')
+                
+                # Field info strings live within their own child block
+                field = res.get('fieldInfo', {})
+                surface = field.get('surfaceType')
+                roof = field.get('roofType')
             except Exception as e:
-                # Fallback gently if a venue profile is missing details
                 pass
 
             conn.execute(text("""
