@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from scripts.run_daily_pipeline import run_pipeline_for_date
+from run_daily_pipeline import run_pipeline_for_date
 
 # Define your range (e.g., start of the 2026 season or last 10 days)
 start_date = datetime.strptime("2023-03-15", "%Y-%m-%d")
