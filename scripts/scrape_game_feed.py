@@ -28,13 +28,10 @@ def run(target_date):
                 win_id, lose_id, save_id = None, None, None
                 officials_list = []
                 
-                # 1. Pull standard schedule decisions first as baseline
-                schedule_decisions = g.get('decisions', {})
-                win_id = schedule_decisions.get('winner', {}).get('id')
-                lose_id = schedule_decisions.get('loser', {}).get('id')
-                save_id = schedule_decisions.get('save', {}).get('id')
+                # Check for Doubleheaders properly ('Y' or 'S' mean it's part of a DH)
+                dh_flag = g.get('doubleHeader') in ['Y', 'S']
 
-                # 2. Try standard boxscore endpoint for weather matrix
+                # Try standard boxscore endpoint for weather matrices
                 box_url = f"https://statsapi.mlb.com/api/v1/game/{game_pk}/boxscore"
                 box_res = requests.get(box_url)
                 
@@ -65,25 +62,23 @@ def run(target_date):
                         except:
                             pass
 
-                # DEEP FALLBACK: Scrape live feed for missing umpires AND explicit pitcher assignments
+                # Deep fetch live data to extract pitcher decisions cleanly
                 try:
                     live_url = f"https://statsapi.mlb.com/api/v1/game/{game_pk}/feed/live"
                     live_data = requests.get(live_url).json()
                     
-                    # Fallback for officials list if empty
                     if not officials_list:
                         officials_list = live_data.get('liveData', {}).get('boxscore', {}).get('officials', [])
                     
-                    # Robust fallback extraction for winning/losing/save pitcher ids
+                    # Target liveData game records directly
                     live_decisions = live_data.get('gameData', {}).get('decisions', {})
-                    if live_decisions:
-                        if not win_id: win_id = live_decisions.get('winner', {}).get('id')
-                        if not lose_id: lose_id = live_decisions.get('loser', {}).get('id')
-                        if not save_id: save_id = live_decisions.get('save', {}).get('id')
+                    win_id = live_decisions.get('winner', {}).get('id')
+                    lose_id = live_decisions.get('loser', {}).get('id')
+                    save_id = live_decisions.get('save', {}).get('id')
                 except:
                     pass
 
-                # Parse and seed identified game officials
+                # Parse and seed game officials
                 for off in officials_list:
                     oid = off.get('official', {}).get('id')
                     oname = off.get('official', {}).get('fullName', 'Unknown Umpire')
@@ -103,7 +98,6 @@ def run(target_date):
                 start_time = g.get('gameDate')
                 start_dt = datetime.strptime(start_time, "%Y-%m-%dT%H:%M:%SZ") if start_time else None
 
-                # Safely write the verified metadata directly to our tables
                 conn.execute(text("""
                     INSERT INTO games (
                         game_pk, game_date, season, game_type, scheduled_start, park_id, home_team_id, away_team_id,
@@ -118,6 +112,7 @@ def run(target_date):
                         winning_pitcher_id = EXCLUDED.winning_pitcher_id,
                         losing_pitcher_id = EXCLUDED.losing_pitcher_id,
                         save_pitcher_id = EXCLUDED.save_pitcher_id,
+                        is_doubleheader = EXCLUDED.is_doubleheader,
                         temperature_f = EXCLUDED.temperature_f, 
                         sky_condition = EXCLUDED.sky_condition,
                         wind_speed_mph = EXCLUDED.wind_speed_mph,
@@ -131,7 +126,7 @@ def run(target_date):
                     "game_type": g.get('gameType', 'R'), "start": start_dt, "park": g.get('venue', {}).get('id'),
                     "home": teams.get('home', {}).get('team', {}).get('id'), "away": teams.get('away', {}).get('team', {}).get('id'),
                     "h_score": teams.get('home', {}).get('score'), "a_score": teams.get('away', {}).get('score'),
-                    "win": win_id, "lose": lose_id, "save": save_id, "dn": g.get('dayNight'), "dh": g.get('doubleHeader') == 'Y',
+                    "win": win_id, "lose": lose_id, "save": save_id, "dn": g.get('dayNight'), "dh": dh_flag,
                     "temp": temp, "sky": sky, "w_spd": wind_spd, "w_dir": wind_direction, "hp": hp_id, "fb": fb_id, "sb": sb_id, "tb": tb_id
                 })
     print(f"Core games mapping entries finalized for date window: {target_date}")
