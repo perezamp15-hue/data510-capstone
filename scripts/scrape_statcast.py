@@ -19,7 +19,7 @@ def run(start_date, end_date):
         print("Empty statcast sequence encountered across date query windows.")
         return
 
-    print(f"⚙️ Parsing {len(df)} telemetry stream entries for ingestion schema...")
+    print(f"Parsing {len(df)} telemetry stream entries for ingestion schema...")
     
     # Fill defaults/safeties to prevent execution parsing errors
     df['launch_speed'] = pd.to_numeric(df['launch_speed'], errors='coerce')
