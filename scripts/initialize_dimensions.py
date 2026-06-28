@@ -1,7 +1,7 @@
 import sys
 import requests
 from sqlalchemy import text
-from db_client import get_engine
+from scripts.db_client import get_engine
 
 def seed_static_dimensions():
     print("Initializing Database Master Dimensions (Phase 1)...")
