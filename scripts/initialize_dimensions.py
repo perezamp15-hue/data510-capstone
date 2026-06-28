@@ -1,55 +1,64 @@
 import sys
 import requests
+from datetime import datetime
 from sqlalchemy import text
 from db_client import get_engine
 
 def seed_static_dimensions():
-    print("Initializing Database Master Dimensions (Phase 1)...")
+    print("Seeding static dimensional parameters...")
     engine = get_engine()
     
     with engine.begin() as conn:
-        print("Fetching and syncing MLB Teams...")
+        # 1. Teams Sync
+        print("Synchronizing master team entities...")
         url = "https://statsapi.mlb.com/api/v1/teams?sportId=1"
-        data = requests.get(url).json()
-        for team in data.get('teams', []):
+        teams = requests.get(url).json().get('teams', [])
+        for t in teams:
             conn.execute(text("""
-                INSERT INTO teams (team_id, team_name, abbreviation, location)
-                VALUES (:id, :name, :abbrev, :loc)
-                ON CONFLICT (team_id) DO UPDATE SET 
-                    team_name = EXCLUDED.team_name, 
-                    abbreviation = EXCLUDED.abbreviation;
+                INSERT INTO teams (team_id, abbreviation, team_name, city, nickname, league, division)
+                VALUES (:id, :abbrev, :name, :city, :nickname, :league, :div)
+                ON CONFLICT (team_id) DO UPDATE SET
+                    abbreviation = EXCLUDED.abbreviation, team_name = EXCLUDED.team_name,
+                    league = EXCLUDED.league, division = EXCLUDED.division;
             """), {
-                "id": team['id'], "name": team['name'], 
-                "abbrev": team.get('fileCode', ''), "loc": team.get('locationName', '')
+                "id": t['id'], "abbrev": t.get('fileCode', ''), "name": t['name'],
+                "city": t.get('locationName', ''), "nickname": t.get('teamName', ''),
+                "league": t.get('league', {}).get('name', ''), "div": t.get('division', {}).get('name', '')
             })
 
-        print("Fetching and syncing MLB Venues...")
+        # 2. Venues Sync
+        print("Synchronizing master park profiles...")
         url = "https://statsapi.mlb.com/api/v1/venues?sportId=1"
-        venue_data = requests.get(url).json()
-        for venue in venue_data.get('venues', []):
+        venues = requests.get(url).json().get('venues', [])
+        for v in venues:
             conn.execute(text("""
-                INSERT INTO parks (park_id, park_name, location)
-                VALUES (:id, :name, :loc)
+                INSERT INTO parks (park_id, park_name, latitude, longitude, elevation, surface_type, roof_style)
+                VALUES (:id, :name, NULL, NULL, NULL, NULL, NULL)
                 ON CONFLICT (park_id) DO NOTHING;
-            """), {
-                "id": venue['id'], "name": venue['name'], "loc": venue.get('city', '')
-            })
+            """), {"id": v['id'], "name": v['name']})
 
-        print("Initializing baseline player dimension profiles...")
+        # 3. Players Initial Load
+        print("Fetching operational baseline players framework...")
         for season in [2023, 2024, 2025, 2026]:
             url = f"https://statsapi.mlb.com/api/v1/sports/1/players?season={season}"
-            player_data = requests.get(url).json()
-            for p in player_data.get('people', []):
+            people = requests.get(url).json().get('people', [])
+            for p in people:
+                debut_str = p.get('mlbDebutDate')
+                debut_date = datetime.strptime(debut_str, "%Y-%m-%d").date() if debut_str else None
+                birth_str = p.get('birthDate')
+                birth_date = datetime.strptime(birth_str, "%Y-%m-%d").date() if birth_str else None
+                
                 conn.execute(text("""
-                    INSERT INTO players (player_id, full_name, primary_position)
-                    VALUES (:id, :name, :pos)
-                    ON CONFLICT (player_id) DO NOTHING;
+                    INSERT INTO players (player_id, full_name, current_team_id, position_code, bats, throws, birth_date, height, weight, mlb_debut, is_active)
+                    VALUES (:id, :name, :team, :pos, :bats, :throws, :birth, :height, :weight, :debut, :active)
+                    ON CONFLICT (player_id) DO UPDATE SET is_active = EXCLUDED.is_active;
                 """), {
-                    "id": p['id'], "name": p['fullName'], 
-                    "pos": p.get('primaryPosition', {}).get('code', 'UNK')
+                    "id": p['id'], "name": p['fullName'], "team": p.get('currentTeam', {}).get('id'),
+                    "pos": p.get('primaryPosition', {}).get('code', 'UNK'), "bats": p.get('batSide', {}).get('code', 'U'),
+                    "throws": p.get('pitchHand', {}).get('code', 'U'), "birth": birth_date, "height": p.get('height', ''),
+                    "weight": p.get('weight', None), "debut": debut_date, "active": p.get('active', True)
                 })
-
-    print("Master Dimension seeding completed successfully!")
+    print("Static dimensions seed sequence completed.")
 
 if __name__ == "__main__":
     seed_static_dimensions()
