@@ -41,56 +41,71 @@ def run(target_date):
                 winning_team_id = home_team_id if is_home_team_win else away_team_id
 
                 # 2. Try standard boxscore endpoint for weather matrices
+                # Try standard boxscore endpoint for baseline officials list
                 box_url = f"https://statsapi.mlb.com/api/v1/game/{game_pk}/boxscore"
                 box_res = requests.get(box_url)
+                weather_str = ""
                 
                 if box_res.status_code == 200:
                     box_data = box_res.json()
                     officials_list = box_data.get('officials', [])
                     
+                    # Look for weather in boxscore first
                     info_list = box_data.get('info', [])
                     weather_node = next((i for i in info_list if i.get('label') == 'Weather'), None)
-                    weather_str = weather_node.get('value', '') if weather_node else ''
+                    if weather_node:
+                        weather_str = weather_node.get('value', '')
+                        
+                #DEEP FETCH: Scrape live feed for missing officials AND the complete weather string
+                try:
+                    live_url = f"https://statsapi.mlb.com/api/v1/game/{game_pk}/feed/live"
+                    live_data = requests.get(live_url).json()
                     
-                    if weather_str:
-                        try:
-                            # 1. Parse Temperature
-                            temp_match = re.search(r'(\d+)\s*degrees', weather_str, re.IGNORECASE)
-                            if temp_match:
-                                temp = int(temp_match.group(1))
+                    if not officials_list:
+                        officials_list = live_data.get('liveData', {}).get('boxscore', {}).get('officials', [])
+                    
+                    # If boxscore weather was missing/short, pull the live data record
+                    if not weather_str:
+                        live_info = live_data.get('liveData', {}).get('boxscore', {}).get('info', [])
+                        live_weather_node = next((i for i in live_info if i.get('label') == 'Weather'), None)
+                        if live_weather_node:
+                            weather_str = live_weather_node.get('value', '')
+                except:
+                    pass
+
+                # Process the weather metrics safely using our string splitter
+                if weather_str:
+                    try:
+                        # 1. Parse Temperature
+                        temp_match = re.search(r'(\d+)\s*degrees', weather_str, re.IGNORECASE)
+                        if temp_match:
+                            temp = int(temp_match.group(1))
+                        
+                        # 2. Parse Sky Condition
+                        parts = weather_str.split(',', 1)
+                        if len(parts) > 1:
+                            sky = parts[1].split('.')[0].strip()
+                        
+                        # 3.Substring Wind Splitter Engine
+                        weather_lower = weather_str.lower()
+                        
+                        if "roof closed" in weather_lower or "indoors" in weather_lower:
+                            wind_spd = 0
+                            wind_direction = "INDOORS"
+                        elif "mph" in weather_lower:
+                            left_side, right_side = weather_lower.split("mph", 1)
+                            speed_digits = re.findall(r'\d+', left_side)
+                            if speed_digits:
+                                wind_spd = int(speed_digits[-1])
                             
-                            # 2. Parse Sky Condition
-                            parts = weather_str.split(',', 1)
-                            if len(parts) > 1:
-                                sky = parts[1].split('.')[0].strip()
+                            dir_text = right_side.replace('.', '').strip().upper()
+                            wind_direction = dir_text if dir_text else "CALM"
+                        else:
+                            wind_spd = 0
+                            wind_direction = "CALM"
                             
-                            # 3. Bulletproof Wind & Direction Parser
-                            weather_lower = weather_str.lower()
-                            
-                            if "roof closed" in weather_lower or "indoors" in weather_lower:
-                                wind_spd = 0
-                                wind_direction = "INDOORS"
-                            elif "mph" in weather_lower:
-                                # Split the string by "mph" to isolate both sides
-                                # e.g., "72 degrees, sunny. wind 5 mph out to cf" 
-                                # -> left: "... wind 5 ", right: " out to cf"
-                                left_side, right_side = weather_lower.split("mph", 1)
-                                
-                                # Extract the last number sequence on the left side for wind speed
-                                speed_digits = re.findall(r'\d+', left_side)
-                                if speed_digits:
-                                    wind_spd = int(speed_digits[-1])
-                                
-                                # Clean up everything on the right side for the wind direction vector
-                                dir_text = right_side.replace('.', '').strip().upper()
-                                wind_direction = dir_text if dir_text else "CALM"
-                            else:
-                                # Catch-all fallback for zero wind scenarios
-                                wind_spd = 0
-                                wind_direction = "CALM"
-                                
-                        except Exception as e:
-                            print(f"Weather parser skipped row formatting on game {game_pk}: {e}")
+                    except Exception as e:
+                        print(f"Weather parser skipped row formatting on game {game_pk}: {e}")
                 # Fallback to Live Feed for missing officials
                 if not officials_list:
                     try:
