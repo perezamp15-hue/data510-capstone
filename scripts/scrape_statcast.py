@@ -1,6 +1,6 @@
 import sys
 import pandas as pd
-from pybaseball import statcast_date_range
+from pybaseball import statcast 
 from sqlalchemy import text
 from db_client import get_engine
 
@@ -10,7 +10,7 @@ def run(start_date, end_date):
     
     # 1. Extract raw data via pybaseball api stream interface layer
     try:
-        df = statcast_date_range(start_dt=start_date, end_dt=end_date)
+        df = statcast(start_dt=start_date, end_dt=end_date)
     except Exception as e:
         print(f"Track data range payload extract issue: {e}")
         return
@@ -19,7 +19,7 @@ def run(start_date, end_date):
         print("Empty statcast sequence encountered across date query windows.")
         return
 
-    print(f"Parsing {len(df)} telemetry stream entries for ingestion schema...")
+    print(f"⚙️ Parsing {len(df)} telemetry stream entries for ingestion schema...")
     
     # Fill defaults/safeties to prevent execution parsing errors
     df['launch_speed'] = pd.to_numeric(df['launch_speed'], errors='coerce')
@@ -29,7 +29,6 @@ def run(start_date, end_date):
     with engine.begin() as conn:
         for _, row in df.iterrows():
             try:
-                # Direct lookup insertion strategy matches our clean 7-table design
                 conn.execute(text("""
                     INSERT INTO statcast_pitches (
                         game_pk, game_date, plate_appearance_number, at_bat_number, pitch_number, inning, inning_half, outs,
