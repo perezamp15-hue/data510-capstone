@@ -126,7 +126,7 @@ def run(season=2026):
             
             conn.execute(text("DROP TABLE IF EXISTS tmp_schedule_staging;"))
             
-        print(f"🎉 Master Schedule Sync finished: Successfully indexed official games.")
+        print(f"Master Schedule Sync finished: Successfully indexed official games.")
         
     except Exception as e:
         print(f"Schedule Sync Error: {e}")
