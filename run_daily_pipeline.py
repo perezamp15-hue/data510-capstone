@@ -6,7 +6,7 @@ try:
     import scripts.scrape_statcast as scrape_statcast
     import scripts.scrape_game_context as scrape_game_context  
     import scripts.scrape_transactions as scrape_transactions
-    from scripts.db_client import get_engine 
+    from db_client import get_engine 
 except ModuleNotFoundError as e:
     print(f"\nCRITICAL IMPORT ERROR IN PIPELINE INITIALIZATION: {e}")
     sys.exit(1)
