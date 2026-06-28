@@ -1,11 +1,7 @@
-import os
 import sys
-sys.path.append(os.path.abspath(os.path.dirname(__file__)))
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "scripts")))
-
 from datetime import datetime, timedelta
 from run_daily_pipeline import run_pipeline_for_date
-from scripts.initialize_dimensions import seed_static_dimensions 
+from scripts.initialize_dimensions import seed_static_dimensions
 
 def run_backfill(start_date_str, end_date_str):
     try:
