@@ -1,55 +1,40 @@
-import sys
-import pandas as pd
-from db_client import get_engine, fetch_api_json
+import requests
 from sqlalchemy import text
+from db_client import get_engine
 
 def run():
-    print("Gathering master professional franchise dimensions...")
+    print("Scraping master MLB team profiles...")
+    engine = get_engine()
+    
     url = "https://statsapi.mlb.com/api/v1/teams?sportId=1"
-    try:
-        data = fetch_api_json(url)
-        raw_teams = data.get('teams', [])
-        parsed = []
-        
-        for t in raw_teams:
-            # FIX: Fallback automatically if sport id mapping block is missing from nested item
-            sport_id = t.get('sport', {}).get('id')
-            if sport_id is not None and sport_id != 1: 
-                continue
-                
-            parsed.append({
-                "team_id": int(t.get('id')),
-                "abbreviation": t.get('fileCode', '').upper() or t.get('abbreviation', 'MLB'),
-                "team_name": t.get('name'),
-                "city": t.get('locationName'),
-                "nickname": t.get('teamName'),
-                "league": t.get('league', {}).get('name', 'AL')[:2].upper(),
-                "division": t.get('division', {}).get('name', 'Unknown').split(' ')[-1]
-            })
-            
-        df = pd.DataFrame(parsed)
-        if df.empty: 
-            print("API Warning: Zero active teams extracted.")
-            return
-            
-        engine = get_engine()
-        with engine.begin() as conn:
-            for _, row in df.iterrows():
-                conn.execute(text("""
-                    INSERT INTO teams (team_id, abbreviation, team_name, city, nickname, league, division)
-                    VALUES (:team_id, :abbreviation, :team_name, :city, :nickname, :league, :division)
-                    ON CONFLICT (team_id) DO UPDATE SET 
-                        abbreviation = EXCLUDED.abbreviation, 
-                        team_name = EXCLUDED.team_name, 
-                        city = EXCLUDED.city, 
-                        nickname = EXCLUDED.nickname, 
-                        league = EXCLUDED.league, 
-                        division = EXCLUDED.division;
-                """), row.to_dict())
-                
-        print(f"Database Verified: Successfully synced {len(parsed)} team profiles.")
-    except Exception as e: 
-        print(f"Teams Error: {e}")
+    teams = requests.get(url).json().get('teams', [])
+    
+    if not teams:
+        print("No team data returned from API.")
+        return
 
-if __name__ == "__main__": 
-    run()
+    with engine.begin() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS public.teams (
+                team_id integer NOT NULL PRIMARY KEY,
+                team_name text NOT NULL,
+                team_code varchar(10),
+                abbreviation varchar(10),
+                location_name text
+            );
+        """))
+
+        for t in teams:
+            conn.execute(text("""
+                INSERT INTO public.teams (team_id, team_name, team_code, abbreviation, location_name)
+                VALUES (:id, :name, :code, :abbr, :loc)
+                ON CONFLICT (team_id) DO UPDATE SET
+                    team_name = EXCLUDED.team_name,
+                    team_code = EXCLUDED.team_code,
+                    abbreviation = EXCLUDED.abbreviation,
+                    location_name = EXCLUDED.location_name;
+            """), {
+                "id": t['id'], "name": t['name'], "code": t.get('teamCode'),
+                "abbr": t.get('abbreviation'), "loc": t.get('locationName')
+            })
+    print(f"Cleanly synchronized {len(teams)} master team dimensions.")
