@@ -49,25 +49,22 @@ def run(target_date):
                 except:
                     pass
 
-                # 3. Your Live Feed Weather Extraction & Splitting Logic
+                # 3. Live Feed Weather Extraction & Splitting Logic
                 try:
                     live_url = f"http://statsapi.mlb.com/api/v1.1/game/{game_pk}/feed/live"
                     live_res = requests.get(live_url)
                     if live_res.status_code == 200:
                         live_data = live_res.json()
                         
-                        # Fallback for officials list if missing from boxscore
                         if not officials_list:
                             officials_list = live_data.get('liveData', {}).get('boxscore', {}).get('officials', [])
                         
-                        # Target the weather object block exactly as requested
                         weather_block = live_data.get('gameData', {}).get('weather', {})
                         raw_temp = weather_block.get('temp')
                         temp = int(raw_temp) if raw_temp else None
                         sky = weather_block.get('condition')
                         wind_raw = weather_block.get('wind')
                         
-                        # Set parsing defaults
                         wind_spd = 0
                         wind_direction = "CALM"
                         
@@ -79,15 +76,12 @@ def run(target_date):
                                 wind_direction = "INDOORS"
                                 sky = "INDOORS"
                             elif "mph" in wind_lower:
-                                # Split down the middle at "mph"
                                 left_side, right_side = wind_lower.split("mph", 1)
                                 
-                                # Isolate the wind speed digits
                                 speed_digits = re.findall(r'\d+', left_side)
                                 if speed_digits:
                                     wind_spd = int(speed_digits[-1])
                                 
-                                # Isolate and clean the directional text mapping
                                 direction_clean = right_side.replace('.', '').replace(',', '').strip().upper()
                                 wind_direction = direction_clean if direction_clean else "CALM"
                 except Exception as e:
@@ -110,6 +104,18 @@ def run(target_date):
                     elif role == 'First Base': fb_id = oid
                     elif role == 'Second Base': sb_id = oid
                     elif role == 'Third Base': tb_id = oid
+
+                # 4.5 JIT PARK SAFETY NET: Resolves the foreign key constraint violations
+                if g.get('venue', {}).get('id'):
+                    venue_node = g.get('venue', {})
+                    p_id = venue_node.get('id')
+                    p_name = venue_node.get('name', f'Unknown Park (ID: {p_id})')
+                    
+                    conn.execute(text("""
+                        INSERT INTO public.parks (park_id, park_name, elevation)
+                        VALUES (:id, :name, 500)
+                        ON CONFLICT (park_id) DO NOTHING;
+                    """), {"id": p_id, "name": p_name})
 
                 start_time = g.get('gameDate')
                 start_dt = datetime.strptime(start_time, "%Y-%m-%dT%H:%M:%SZ") if start_time else None
