@@ -3,7 +3,7 @@ from sqlalchemy import text
 from db_client import get_engine
 
 def run():
-    print("Scraping master MLB team profiles...")
+    print("🏢 Scraping master MLB team profiles...")
     engine = get_engine()
     
     url = "https://statsapi.mlb.com/api/v1/teams?sportId=1"
@@ -14,15 +14,18 @@ def run():
         return
 
     with engine.begin() as conn:
+        # Base table initialization
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS public.teams (
                 team_id integer NOT NULL PRIMARY KEY,
-                team_name text NOT NULL,
-                team_code varchar(10),
-                abbreviation varchar(10),
-                location_name text
+                team_name text NOT NULL
             );
         """))
+        
+        # 🛡️ Self-Healing Migration: Explicitly patch missing schema columns if table already existed
+        conn.execute(text("ALTER TABLE public.teams ADD COLUMN IF NOT EXISTS team_code varchar(10);"))
+        conn.execute(text("ALTER TABLE public.teams ADD COLUMN IF NOT EXISTS abbreviation varchar(10);"))
+        conn.execute(text("ALTER TABLE public.teams ADD COLUMN IF NOT EXISTS location_name text;"))
 
         for t in teams:
             conn.execute(text("""
@@ -34,7 +37,10 @@ def run():
                     abbreviation = EXCLUDED.abbreviation,
                     location_name = EXCLUDED.location_name;
             """), {
-                "id": t['id'], "name": t['name'], "code": t.get('teamCode'),
-                "abbr": t.get('abbreviation'), "loc": t.get('locationName')
+                "id": t['id'], 
+                "name": t['name'], 
+                "code": t.get('teamCode'),
+                "abbr": t.get('abbreviation'), 
+                "loc": t.get('locationName')
             })
     print(f"Cleanly synchronized {len(teams)} master team dimensions.")
