@@ -105,20 +105,27 @@ def run(target_date):
                     elif role == 'Second Base': sb_id = oid
                     elif role == 'Third Base': tb_id = oid
 
-                # 4.5 JIT PARK SAFETY NET: Resolves the foreign key constraint violations
+               # 4.5 JIT PARK SAFETY NET: Optimized with read-first check to prevent deadlocks
                 if g.get('venue', {}).get('id'):
                     venue_node = g.get('venue', {})
                     p_id = venue_node.get('id')
                     p_name = venue_node.get('name', f'Unknown Park (ID: {p_id})')
                     
-                    conn.execute(text("""
-                        INSERT INTO public.parks (park_id, park_name, elevation)
-                        VALUES (:id, :name, 500)
-                        ON CONFLICT (park_id) DO NOTHING;
-                    """), {"id": p_id, "name": p_name})
-
-                start_time = g.get('gameDate')
-                start_dt = datetime.strptime(start_time, "%Y-%m-%dT%H:%M:%SZ") if start_time else None
+                    # Read-first check: Avoids hitting an exclusive table write lock if it already exists
+                    park_exists = conn.execute(
+                        text("SELECT 1 FROM public.parks WHERE park_id = :id"), 
+                        {"id": p_id}
+                    ).fetchone()
+                    
+                    if not park_exists:
+                        try:
+                            conn.execute(text("""
+                                INSERT INTO public.parks (park_id, park_name, elevation)
+                                VALUES (:id, :name, 500)
+                                ON CONFLICT (park_id) DO NOTHING;
+                            """), {"id": p_id, "name": p_name})
+                        except Exception as e:
+                            print(f"Safe-skipping parallel race condition on park insert: {e}")
 
                 # 5. Populate public.games Warehouse Schema
                 conn.execute(text("""
