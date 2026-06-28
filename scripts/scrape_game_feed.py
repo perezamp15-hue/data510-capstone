@@ -23,14 +23,11 @@ def run(target_date):
                 if status != 'Final':
                     continue
 
-                # Initialize database defaults matching public.games
                 temp, sky, wind_spd, wind_direction = None, None, None, None
                 hp_id, fb_id, sb_id, tb_id = None, None, None, None
                 officials_list = []
-                
                 dh_flag = g.get('doubleHeader') in ['Y', 'S']
 
-                # 1. Analytical Win & Indicator Evaluations
                 teams = g.get('teams', {})
                 home_team_id = teams.get('home', {}).get('team', {}).get('id')
                 away_team_id = teams.get('away', {}).get('team', {}).get('id')
@@ -40,7 +37,6 @@ def run(target_date):
                 is_home_team_win = home_score > away_score
                 winning_team_id = home_team_id if is_home_team_win else away_team_id
 
-                # 2. Extract Baseline Officials List from Boxscore
                 box_url = f"https://statsapi.mlb.com/api/v1/game/{game_pk}/boxscore"
                 try:
                     box_res = requests.get(box_url)
@@ -49,7 +45,6 @@ def run(target_date):
                 except:
                     pass
 
-                # 3. Live Feed Weather Extraction & Splitting Logic
                 try:
                     live_url = f"http://statsapi.mlb.com/api/v1.1/game/{game_pk}/feed/live"
                     live_res = requests.get(live_url)
@@ -70,18 +65,15 @@ def run(target_date):
                         
                         if wind_raw:
                             wind_lower = wind_raw.lower()
-                            
                             if "roof closed" in wind_lower or "indoors" in wind_lower:
                                 wind_spd = 0
                                 wind_direction = "INDOORS"
                                 sky = "INDOORS"
                             elif "mph" in wind_lower:
                                 left_side, right_side = wind_lower.split("mph", 1)
-                                
                                 speed_digits = re.findall(r'\d+', left_side)
                                 if speed_digits:
                                     wind_spd = int(speed_digits[-1])
-                                
                                 direction_clean = right_side.replace('.', '').replace(',', '').strip().upper()
                                 wind_direction = direction_clean if direction_clean else "CALM"
                 except Exception as e:
@@ -89,45 +81,36 @@ def run(target_date):
                     wind_spd = 0
                     wind_direction = "UNKNOWN"
 
-                # 4. Parse and Seed Game Officials
                 for off in officials_list:
                     oid = off.get('official', {}).get('id')
                     oname = off.get('official', {}).get('fullName', 'Unknown Umpire')
                     role = off.get('officialType')
-                    
-                    if not oid:
-                        continue
+                    if not oid: continue
                     
                     conn.execute(text("INSERT INTO umpires (umpire_id, umpire_name) VALUES (:id, :name) ON CONFLICT (umpire_id) DO NOTHING;"), {"id": oid, "name": oname})
-                    
                     if role == 'Home Plate': hp_id = oid
                     elif role == 'First Base': fb_id = oid
                     elif role == 'Second Base': sb_id = oid
                     elif role == 'Third Base': tb_id = oid
 
-               # 4.5 JIT PARK SAFETY NET: Optimized with read-first check to prevent deadlocks
+                # MOVED UP: Parse timestamp variables first so they are defined for the queries below
+                start_time = g.get('gameDate')
+                start_dt = datetime.strptime(start_time, "%Y-%m-%dT%H:%M:%SZ") if start_time else None
+
+                # JIT PARK SAFETY NET
                 if g.get('venue', {}).get('id'):
                     venue_node = g.get('venue', {})
                     p_id = venue_node.get('id')
                     p_name = venue_node.get('name', f'Unknown Park (ID: {p_id})')
                     
-                    # Read-first check: Avoids hitting an exclusive table write lock if it already exists
-                    park_exists = conn.execute(
-                        text("SELECT 1 FROM public.parks WHERE park_id = :id"), 
-                        {"id": p_id}
-                    ).fetchone()
-                    
+                    park_exists = conn.execute(text("SELECT 1 FROM public.parks WHERE park_id = :id"), {"id": p_id}).fetchone()
                     if not park_exists:
                         try:
-                            conn.execute(text("""
-                                INSERT INTO public.parks (park_id, park_name, elevation)
-                                VALUES (:id, :name, 500)
-                                ON CONFLICT (park_id) DO NOTHING;
-                            """), {"id": p_id, "name": p_name})
+                            conn.execute(text("INSERT INTO public.parks (park_id, park_name, elevation) VALUES (:id, :name, 500) ON CONFLICT (park_id) DO NOTHING;"), {"id": p_id, "name": p_name})
                         except Exception as e:
-                            print(f"Safe-skipping parallel race condition on park insert: {e}")
+                            print(f"Safe-skipping parallel race condition: {e}")
 
-                # 5. Populate public.games Warehouse Schema
+                # Populate public.games Warehouse Schema
                 conn.execute(text("""
                     INSERT INTO public.games (
                         game_pk, game_date, season, game_type, scheduled_start, park_id, home_team_id, away_team_id,
@@ -138,22 +121,13 @@ def run(target_date):
                         :game_pk, :game_date, :season, :game_type, :start, :park, :home, :away, :h_score, :a_score, :dn, :dh,
                         :temp, :sky, :w_spd, :w_dir, :hp, :fb, :sb, :tb, :win_team, :is_home_win
                     ) ON CONFLICT (game_pk) DO UPDATE SET
-                        home_score = EXCLUDED.home_score, 
-                        away_score = EXCLUDED.away_score,
-                        day_night_type = EXCLUDED.day_night_type,
-                        is_doubleheader = EXCLUDED.is_doubleheader,
-                        temperature_f = EXCLUDED.temperature_f, 
-                        sky_condition = EXCLUDED.sky_condition,
-                        wind_speed_mph = EXCLUDED.wind_speed_mph,
-                        wind_direction = EXCLUDED.wind_direction,
-                        home_plate_ump_id = EXCLUDED.home_plate_ump_id,
-                        first_base_ump_id = EXCLUDED.first_base_ump_id,
-                        second_base_ump_id = EXCLUDED.second_base_ump_id,
-                        third_base_ump_id = EXCLUDED.third_base_ump_id,
-                        winning_team_id = EXCLUDED.winning_team_id,
-                        is_home_team_win = EXCLUDED.is_home_team_win;
+                        home_score = EXCLUDED.home_score, away_score = EXCLUDED.away_score, day_night_type = EXCLUDED.day_night_type,
+                        is_doubleheader = EXCLUDED.is_doubleheader, temperature_f = EXCLUDED.temperature_f, sky_condition = EXCLUDED.sky_condition,
+                        wind_speed_mph = EXCLUDED.wind_speed_mph, wind_direction = EXCLUDED.wind_direction, home_plate_ump_id = EXCLUDED.home_plate_ump_id,
+                        first_base_ump_id = EXCLUDED.first_base_ump_id, second_base_ump_id = EXCLUDED.second_base_ump_id, third_base_ump_id = EXCLUDED.third_base_ump_id,
+                        winning_team_id = EXCLUDED.winning_team_id, is_home_team_win = EXCLUDED.is_home_team_win;
                 """), {
-                    "game_pk": game_pk, "game_date": datetime.strptime(target_date, "%Y-%m-%d").date(), "season": g.get('season', 2023),
+                    "game_pk": game_pk, "game_date": datetime.strptime(target_date, "%Y-%m-%d").date(), "season": str(g.get('season', 2023)),
                     "game_type": g.get('gameType', 'R'), "start": start_dt, "park": g.get('venue', {}).get('id'),
                     "home": home_team_id, "away": away_team_id, "h_score": home_score, "a_score": away_score,
                     "dn": g.get('dayNight'), "dh": dh_flag, "temp": temp, "sky": sky, "w_spd": wind_spd, "w_dir": wind_direction, 
