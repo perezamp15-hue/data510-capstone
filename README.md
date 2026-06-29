@@ -96,7 +96,7 @@ One subsection per class week. The owner team commits the new section **before e
 ## Week 7 -- Data summary milestone (M2)
 
 **Iteration ending:** <date>
-**Milestone tag in focus:** `M2-data-summary`
+**Milestone tag in focus:** deliverables/
 
 **Completed PBIs**
 - ...
