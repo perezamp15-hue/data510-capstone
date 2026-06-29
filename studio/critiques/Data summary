@@ -1,0 +1,30 @@
+# Critique and Recommendations
+From Sarah Alhusaynat To Aaron
+Week 7 critic
+
+Overall, this project demonstrates a strong technical foundation and reflects a significant amount of effort in 
+designing a reproducible data pipeline, relational database, and feature engineering workflow for predicting Major 
+League Baseball game outcomes. The documentation is detailed and shows careful consideration of data collection, 
+storage, and organization. 
+
+One area that could be improved is the connection between the research question and the data engineering decisions.
+While the report thoroughly describes the datasets, database schema, and SQL views, it does not consistently explain 
+why each feature or data source contributes to predicting game outcomes. Variables such as weather conditions, pitch 
+velocity, umpire assignments, and bullpen usage are introduced, but the report would benefit from briefly explaining 
+their predictive relevance. Establishing a clearer link between the research objective, selected variables, engineered 
+features, and the final prediction dataset would help readers understand how the collected data supports the overall modeling process.
+
+Another important consideration for the data is the potential for data leakage. The project includes variables such as final scores, 
+winning team identifiers, and other game outcome information within the database schema. Because the stated objective is 
+to predict game outcomes, the report should explicitly distinguish between features available before the game begins and
+variables that are only known after the game concludes. Clarifying which variables are used as predictors and which are 
+reserved solely as target variables would strengthen the methodological rigor of the project and increase confidence in 
+the validity of the predictive model.
+
+
+
+I think, the report would benefit from a stronger discussion of the planned modeling and evaluation process. 
+ROC-AUC, precision, recall, or calibration, would better connect the data preparation phase to 
+the project's predictive objectives. Additionally, acknowledging limitations and look more into ethics malpractice ,such as unexpected injuries, lineup 
+changes, coaching decisions, or weather forecast uncertainty would provide a balanced assessment of factors that 
+cannot be fully captured within the available data.
