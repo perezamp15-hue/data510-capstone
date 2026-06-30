@@ -22,7 +22,7 @@ def run():
             );
         """))
         
-        # 🛡️ Self-Healing Migration: Explicitly patch missing schema columns if table already existed
+        # Self-Healing Migration: Explicitly patch missing schema columns if table already existed
         conn.execute(text("ALTER TABLE public.teams ADD COLUMN IF NOT EXISTS team_code varchar(10);"))
         conn.execute(text("ALTER TABLE public.teams ADD COLUMN IF NOT EXISTS abbreviation varchar(10);"))
         conn.execute(text("ALTER TABLE public.teams ADD COLUMN IF NOT EXISTS location_name text;"))
