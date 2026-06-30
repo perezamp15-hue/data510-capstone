@@ -3,7 +3,7 @@ from sqlalchemy import text
 from db_client import get_engine
 
 def run():
-    print("🏢 Scraping master MLB team profiles...")
+    print("Scraping master MLB team profiles...")
     engine = get_engine()
     
     url = "https://statsapi.mlb.com/api/v1/teams?sportId=1"
