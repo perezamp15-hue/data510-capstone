@@ -82,3 +82,28 @@ desktop.ini
 *.swp
 *.swo
 *~
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# IDE and operating system
+.DS_Store
+.vscode/
+.idea/
+
+# Generated analytics exports
+exports/**/*.json
+exports/**/*.csv
+exports/**/*.parquet
+
+# Keep export directories
+!exports/**/.gitkeep

@@ -1,3 +1,4 @@
+import subprocess
 import sys
 from datetime import datetime, timedelta
 
@@ -9,32 +10,81 @@ except ModuleNotFoundError as e:
     print(f"\nCRITICAL ENTRY INITIALIZATION PATHWAYS MISSING: {e}")
     sys.exit(1)
 
-def run_pipeline_for_date(target_date):
-    print(f"\n=======================================================")
-    print(f"Running Normalized 7-Table Warehouse System: {target_date}")
-    print(f"=======================================================")
+# PHASE ONE ANALYTICS FOUNDATION
+def run_analytics_foundation() -> None:
+    print("\n" + "=" * 70)
+    print("Running Phase One Analytics Foundation")
+    print("=" * 70)
 
-    print("\n--- Phase 2: Running Game Feeds ---")
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "analytics.run_phase_one",
+        ],
+        check=False,
+    )
+
+    if result.returncode != 0:
+        raise RuntimeError(
+            "Analytics foundation validation failed."
+        )
+
+    print("Analytics foundation completed successfully.")
+
+# DAILY PIPELINE
+def run_pipeline_for_date(target_date: str) -> None:
+    print("\n=======================================================")
+    print(f"Running Normalized 7-Table Warehouse System: {target_date}")
+    print("=======================================================")
+
+    # GAME FEED INGESTION
+    print("\n--- Phase 1: Running Game Feeds ---")
+
     try:
         scrape_game_feed.run(target_date)
+        print("Game feed ingestion completed.")
     except Exception as e:
         print(f"Core game schedule execution failed: {e}")
         return
 
-    print("\n--- Phase 3: Telemetry Stream Logging ---")
+    # STATCAST INGESTION
+    print("\n--- Phase 2: Running Statcast Collection ---")
+
     try:
         scrape_statcast.run(target_date, target_date)
+        print("Statcast ingestion completed.")
     except Exception as e:
         print(f"Statcast execution failed: {e}")
-        
+
+    # TRANSACTIONS INGESTION
+    print("\n--- Phase 3: Running Transactions Collection ---")
+
     try:
         scrape_transactions.run(target_date)
+        print("Transaction ingestion completed.")
     except Exception as e:
         print(f"Transaction ingestion processing failed: {e}")
 
-    print(f"\nPipeline step successful for date: {target_date}")
+    # ANALYTICS FOUNDATION
+    print("\n--- Phase 4: Running Analytics Foundation ---")
 
+    try:
+        run_analytics_foundation()
+    except Exception as e:
+        print(f"Analytics foundation failed: {e}")
+        return
+
+    print("\n=======================================================")
+    print(f"Pipeline completed successfully for {target_date}")
+    print("=======================================================")
+
+# ENTRY POINT
 if __name__ == "__main__":
-    yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+    yesterday = (
+        datetime.now() - timedelta(days=1)
+    ).strftime("%Y-%m-%d")
+
     date_arg = sys.argv[1] if len(sys.argv) > 1 else yesterday
+
     run_pipeline_for_date(date_arg)
