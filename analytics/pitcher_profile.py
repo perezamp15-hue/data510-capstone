@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Any
 import pandas as pd
+from analytics.pitcher_grade import build_pitcher_grades
 from analytics.pitcher_metrics import (
     calculate_pitch_arsenal,
     calculate_pitcher_summary,
@@ -556,6 +557,10 @@ def build_pitcher_profile(
     identity = get_pitcher_identity(pitches)
     summary = calculate_pitcher_summary(pitches)
     arsenal = calculate_pitch_arsenal(pitches)
+    grades = build_pitcher_grades(
+    summary=summary,
+    arsenal=arsenal,
+    )
     velocity_distribution = (
         calculate_velocity_distribution(pitches)
     )
@@ -566,51 +571,52 @@ def build_pitcher_profile(
     best_strike_pitch = get_best_strike_pitch(arsenal)
 
     return {
-        "identity": identity,
-        "classification": {
-            "pitcher_type": classify_pitcher_type(
-                summary,
-                arsenal,
-            ),
-            "velocity_profile": classify_velocity(
-                arsenal
-            ),
-            "command_profile": classify_command(
-                summary
-            ),
-            "bat_missing_profile": classify_bat_missing(
-                summary
-            ),
-            "chase_profile": classify_chase_profile(
-                summary
-            ),
-            "contact_profile": classify_contact_quality(
-                summary
-            ),
-            "arsenal_shape": classify_arsenal_shape(
-                arsenal
-            ),
-        },
-        "summary": summary,
-        "arsenal": arsenal,
-        "velocity_distribution": velocity_distribution,
-        "highlights": {
-            "primary_pitch": primary_pitch,
-            "best_whiff_pitch": best_whiff_pitch,
-            "best_chase_pitch": best_chase_pitch,
-            "best_strike_pitch": best_strike_pitch,
-        },
-        "strengths": build_strengths(
+    "identity": identity,
+    "classification": {
+        "pitcher_type": classify_pitcher_type(
             summary,
             arsenal,
         ),
-        "concerns": build_concerns(
-            summary,
-            arsenal,
+        "velocity_profile": classify_velocity(
+            arsenal
         ),
-        "scouting_summary": build_scouting_summary(
-            identity,
-            summary,
-            arsenal,
+        "command_profile": classify_command(
+            summary
         ),
-    }
+        "bat_missing_profile": classify_bat_missing(
+            summary
+        ),
+        "chase_profile": classify_chase_profile(
+            summary
+        ),
+        "contact_profile": classify_contact_quality(
+            summary
+        ),
+        "arsenal_shape": classify_arsenal_shape(
+            arsenal
+        ),
+    },
+    "summary": summary,
+    "grades": grades,
+    "arsenal": arsenal,
+    "velocity_distribution": velocity_distribution,
+    "highlights": {
+        "primary_pitch": primary_pitch,
+        "best_whiff_pitch": best_whiff_pitch,
+        "best_chase_pitch": best_chase_pitch,
+        "best_strike_pitch": best_strike_pitch,
+    },
+    "strengths": build_strengths(
+        summary,
+        arsenal,
+    ),
+    "concerns": build_concerns(
+        summary,
+        arsenal,
+    ),
+    "scouting_summary": build_scouting_summary(
+        identity,
+        summary,
+        arsenal,
+    ),
+}
