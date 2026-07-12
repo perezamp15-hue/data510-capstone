@@ -186,7 +186,7 @@ SELECT
     g.wind_speed_mph,
     g.wind_direction,
     park.elevation,
-    sp.play_description
+    sp.pitch_description
 FROM public.statcast_pitches AS sp
 LEFT JOIN public.games AS g
     ON g.game_pk = sp.game_pk
@@ -281,7 +281,7 @@ SELECT
     g.wind_speed_mph,
     g.wind_direction,
     park.elevation,
-    sp.play_description
+    sp.pitch_description
 FROM public.statcast_pitches AS sp
 LEFT JOIN public.games AS g
     ON g.game_pk = sp.game_pk

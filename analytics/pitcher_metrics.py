@@ -10,8 +10,6 @@ SWING_EVENTS = {
     "foul_tip",
     "foul_bunt",
     "hit_into_play",
-    "hit_into_play_no_out",
-    "hit_into_play_score",
 }
 
 WHIFF_EVENTS = {
@@ -31,8 +29,6 @@ STRIKE_EVENTS = {
     "foul_tip",
     "foul_bunt",
     "hit_into_play",
-    "hit_into_play_no_out",
-    "hit_into_play_score",
 }
 
 BALL_EVENTS = {
@@ -40,6 +36,7 @@ BALL_EVENTS = {
     "blocked_ball",
     "pitchout",
     "intent_ball",
+    "hit_by_pitch",
 }
 
 def safe_percentage(
@@ -92,7 +89,7 @@ def add_pitch_flags(pitches: pd.DataFrame) -> pd.DataFrame:
         return frame
 
     frame["normalized_description"] = (
-        frame["play_description"]
+        frame["pitch_description"]
         .apply(normalize_event)
     )
 
