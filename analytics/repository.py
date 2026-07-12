@@ -3,6 +3,13 @@ from datetime import date, datetime
 from typing import Any
 import pandas as pd
 from analytics import queries
+from typing import Optional
+import pandas as pd
+from analytics.database import read_dataframe
+from analytics.queries import (
+    PITCHER_BATTER_MATCHUP_QUERY,
+    PLAYER_SEARCH_QUERY,
+)
 from analytics.database import read_dataframe, read_scalar
 from analytics.exceptions import DataNotFoundError, ValidationError
 from analytics.validation import (
@@ -12,7 +19,7 @@ from analytics.validation import (
     validate_positive_id,
     validate_season,
 )
-
+from analytics import queries
 
 class BaseballRepository:
     # DATABASE STATUS
@@ -313,4 +320,118 @@ class BaseballRepository:
         return read_dataframe(
             queries.RECENT_TRANSACTIONS_QUERY,
             {"limit": limit},
+        )
+    
+        # --------------------------------------------------
+    # PITCHER SEARCH
+    # --------------------------------------------------
+
+    def search_pitchers(
+        self,
+        search_text: str,
+        limit: int = 25,
+    ) -> pd.DataFrame:
+        """
+        Search only players that have appeared as pitchers.
+        """
+
+        if not isinstance(search_text, str):
+            raise ValidationError(
+                "search_text must be a string."
+            )
+
+        cleaned = search_text.strip()
+
+        if len(cleaned) < 2:
+            raise ValidationError(
+                "search_text must contain at least two characters."
+            )
+
+        validate_limit(limit, maximum=100)
+
+        return read_dataframe(
+            queries.PITCHER_SEARCH_QUERY,
+            {
+                "search_pattern": f"%{cleaned}%",
+                "limit": limit,
+            },
+        )
+
+
+    # --------------------------------------------------
+    # BATTER SEARCH
+    # --------------------------------------------------
+
+    def search_batters(
+        self,
+        search_text: str,
+        limit: int = 25,
+    ) -> pd.DataFrame:
+        """
+        Search only players that have appeared as batters.
+        """
+
+        if not isinstance(search_text, str):
+            raise ValidationError(
+                "search_text must be a string."
+            )
+
+        cleaned = search_text.strip()
+
+        if len(cleaned) < 2:
+            raise ValidationError(
+                "search_text must contain at least two characters."
+            )
+
+        validate_limit(limit, maximum=100)
+
+        return read_dataframe(
+            queries.BATTER_SEARCH_QUERY,
+            {
+                "search_pattern": f"%{cleaned}%",
+                "limit": limit,
+            },
+        )
+
+    # PITCHER VS BATTER MATCHUP
+    def get_pitcher_batter_matchup(
+        self,
+        pitcher_id: int,
+        batter_id: int,
+        season: Optional[int] = None,
+        start_date: date | datetime | str | None = None,
+        end_date: date | datetime | str | None = None,
+    ) -> pd.DataFrame:
+        """
+        Return every pitch thrown from one pitcher
+        to one batter.
+        """
+
+        validate_positive_id(
+            pitcher_id,
+            "pitcher_id",
+        )
+
+        validate_positive_id(
+            batter_id,
+            "batter_id",
+        )
+
+        if season is not None:
+            validate_season(season)
+
+        parsed_start, parsed_end = validate_date_range(
+            start_date,
+            end_date,
+        )
+
+        return read_dataframe(
+            queries.PITCHER_BATTER_MATCHUP_QUERY,
+            {
+                "pitcher_id": pitcher_id,
+                "batter_id": batter_id,
+                "season": season,
+                "start_date": parsed_start,
+                "end_date": parsed_end,
+            },
         )

@@ -185,7 +185,8 @@ SELECT
     g.sky_condition,
     g.wind_speed_mph,
     g.wind_direction,
-    park.elevation
+    park.elevation,
+    sp.play_description
 FROM public.statcast_pitches AS sp
 LEFT JOIN public.games AS g
     ON g.game_pk = sp.game_pk
@@ -279,7 +280,8 @@ SELECT
     g.sky_condition,
     g.wind_speed_mph,
     g.wind_direction,
-    park.elevation
+    park.elevation,
+    sp.play_description
 FROM public.statcast_pitches AS sp
 LEFT JOIN public.games AS g
     ON g.game_pk = sp.game_pk
@@ -614,3 +616,165 @@ LEFT JOIN public.teams AS to_team
 ORDER BY tr.transaction_date DESC, tr.id DESC
 LIMIT :limit
 """
+
+# Pitcher and Batter Analysis
+PITCHER_BATTER_MATCHUP_QUERY = """
+SELECT
+    sp.pitch_id,
+    sp.game_pk,
+    sp.game_date,
+    sp.inning,
+    sp.inning_half,
+    sp.plate_appearance_number,
+    sp.at_bat_number,
+    sp.pitch_number,
+
+    sp.pitcher_id,
+    pitcher.full_name AS pitcher_name,
+    pitcher.throws AS pitcher_throws,
+
+    sp.batter_id,
+    batter.full_name AS batter_name,
+    batter.bats AS batter_side,
+
+    sp.pitch_type,
+    sp.release_velocity,
+    sp.release_spin_rate,
+    sp.release_extension,
+    sp.release_pos_x,
+    sp.release_pos_y,
+    sp.release_pos_z,
+
+    sp.plate_crossing_x,
+    sp.plate_crossing_z,
+    sp.sz_top,
+    sp.sz_bot,
+
+    sp.ball_count,
+    sp.strike_count,
+    sp.outs,
+
+    sp.play_event,
+    sp.play_description,
+
+    sp.exit_velocity,
+    sp.launch_angle,
+    sp.hit_distance,
+    sp.expected_woba,
+    sp.expected_slugging,
+    sp.is_hard_hit,
+    sp.is_sweet_spot
+
+FROM public.statcast_pitches AS sp
+
+INNER JOIN public.players AS pitcher
+    ON pitcher.player_id = sp.pitcher_id
+
+INNER JOIN public.players AS batter
+    ON batter.player_id = sp.batter_id
+
+INNER JOIN public.games AS g
+    ON g.game_pk = sp.game_pk
+
+WHERE sp.pitcher_id = :pitcher_id
+  AND sp.batter_id = :batter_id
+
+  AND (
+        CAST(:season AS INTEGER) IS NULL
+        OR g.season = CAST(:season AS INTEGER)
+      )
+
+  AND (
+        CAST(:start_date AS DATE) IS NULL
+        OR sp.game_date >= CAST(:start_date AS DATE)
+      )
+
+  AND (
+        CAST(:end_date AS DATE) IS NULL
+        OR sp.game_date <= CAST(:end_date AS DATE)
+      )
+
+ORDER BY
+    sp.game_date DESC,
+    sp.game_pk DESC,
+    sp.at_bat_number,
+    sp.pitch_number
+"""
+# Player Searcher
+PLAYER_SEARCH_QUERY = """
+SELECT
+    p.player_id,
+    p.full_name,
+    p.current_team_id,
+    t.abbreviation AS team_abbreviation,
+    p.position_code,
+    p.bats,
+    p.throws,
+    p.is_active
+
+FROM public.players AS p
+
+LEFT JOIN public.teams AS t
+    ON t.team_id = p.current_team_id
+
+WHERE LOWER(p.full_name) LIKE LOWER(:search_pattern)
+
+ORDER BY
+    CASE
+        WHEN LOWER(p.full_name) = LOWER(:exact_name) THEN 0
+        WHEN LOWER(p.full_name) LIKE LOWER(:starts_with) THEN 1
+        ELSE 2
+    END,
+    p.full_name
+
+LIMIT :limit
+"""
+
+PITCHER_SEARCH_QUERY = """
+SELECT DISTINCT
+    p.player_id,
+    p.full_name,
+    p.current_team_id,
+    t.abbreviation AS team_abbreviation,
+    p.position_code,
+    p.throws,
+    p.is_active
+
+FROM public.players AS p
+
+INNER JOIN public.statcast_pitches AS sp
+    ON sp.pitcher_id = p.player_id
+
+LEFT JOIN public.teams AS t
+    ON t.team_id = p.current_team_id
+
+WHERE LOWER(p.full_name) LIKE LOWER(:search_pattern)
+
+ORDER BY p.full_name
+LIMIT :limit
+"""
+
+BATTER_SEARCH_QUERY = """
+SELECT DISTINCT
+    p.player_id,
+    p.full_name,
+    p.current_team_id,
+    t.abbreviation AS team_abbreviation,
+    p.position_code,
+    p.bats,
+    p.is_active
+
+FROM public.players AS p
+
+INNER JOIN public.statcast_pitches AS sp
+    ON sp.batter_id = p.player_id
+
+LEFT JOIN public.teams AS t
+    ON t.team_id = p.current_team_id
+
+WHERE LOWER(p.full_name) LIKE LOWER(:search_pattern)
+
+ORDER BY p.full_name
+LIMIT :limit
+"""
+
