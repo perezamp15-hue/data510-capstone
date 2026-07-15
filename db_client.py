@@ -1,16 +1,40 @@
 import os
-import sys
-import requests
-from sqlalchemy import create_engine
 
-def get_engine():
-    database_url = os.environ.get("DATABASE_URL")
+from dotenv import load_dotenv
+from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
+
+
+load_dotenv()
+
+
+def get_engine() -> Engine:
+    database_url = os.getenv("DATABASE_URL")
+
     if not database_url:
-        print("CRITICAL: DATABASE_URL environment variable is missing!")
-        sys.exit(1)
+        raise RuntimeError(
+            "DATABASE_URL environment variable is missing. "
+            "Add it to the project .env file."
+        )
+
     if database_url.startswith("postgres://"):
-        database_url = database_url.replace("postgres://", "postgresql://", 1)
-    return create_engine(database_url)
+        database_url = database_url.replace(
+            "postgres://",
+            "postgresql+psycopg://",
+            1,
+        )
+
+    elif database_url.startswith("postgresql://"):
+        database_url = database_url.replace(
+            "postgresql://",
+            "postgresql+psycopg://",
+            1,
+        )
+
+    return create_engine(
+        database_url,
+        pool_pre_ping=True,
+    )
 
 def fetch_api_json(url):
     response = requests.get(url, timeout=15)

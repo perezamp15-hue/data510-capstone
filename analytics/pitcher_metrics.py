@@ -298,12 +298,21 @@ def calculate_pitch_arsenal(
     pitches: pd.DataFrame,
 ) -> list[dict[str, Any]]:
     """
-    Calculate metrics grouped by pitch type.
+    Calculate pitch-level arsenal metrics grouped by pitch type.
+
+    Movement values are returned in inches:
+    - average_horizontal_break
+    - average_vertical_break
+
+    Statcast pfx_x and pfx_z are stored in feet, so they are
+    multiplied by 12 before being added to the report.
     """
     if pitches.empty:
         return []
 
-    frame = add_pitch_flags(pitches)
+    frame = add_pitch_flags(
+        pitches
+    )
 
     valid_pitches = frame.loc[
         frame["pitch_type"].notna()
@@ -312,8 +321,19 @@ def calculate_pitch_arsenal(
     if valid_pitches.empty:
         return []
 
-    total_pitches = len(valid_pitches)
-    arsenal: list[dict[str, Any]] = []
+    if "pfx_x" not in valid_pitches.columns:
+        valid_pitches["pfx_x"] = pd.NA
+
+    if "pfx_z" not in valid_pitches.columns:
+        valid_pitches["pfx_z"] = pd.NA
+
+    total_pitches = len(
+        valid_pitches
+    )
+
+    arsenal: list[
+        dict[str, Any]
+    ] = []
 
     grouped = valid_pitches.groupby(
         "pitch_type",
@@ -322,12 +342,30 @@ def calculate_pitch_arsenal(
 
     for pitch_type, group in grouped:
         pitch_count = len(group)
-        swing_count = int(group["is_swing"].sum())
-        whiff_count = int(group["is_whiff"].sum())
-        strike_count = int(group["is_strike"].sum())
-        csw_count = int(group["is_csw"].sum())
-        zone_count = int(group["is_in_zone"].sum())
-        chase_count = int(group["is_chase"].sum())
+
+        swing_count = int(
+            group["is_swing"].sum()
+        )
+
+        whiff_count = int(
+            group["is_whiff"].sum()
+        )
+
+        strike_count = int(
+            group["is_strike"].sum()
+        )
+
+        csw_count = int(
+            group["is_csw"].sum()
+        )
+
+        zone_count = int(
+            group["is_in_zone"].sum()
+        )
+
+        chase_count = int(
+            group["is_chase"].sum()
+        )
 
         out_of_zone_count = int(
             (~group["is_in_zone"]).sum()
@@ -344,39 +382,88 @@ def calculate_pitch_arsenal(
             .sum()
         )
 
+        horizontal_break_feet = safe_mean(
+            group["pfx_x"],
+            decimals=3,
+        )
+
+        vertical_break_feet = safe_mean(
+            group["pfx_z"],
+            decimals=3,
+        )
+
+        average_horizontal_break = (
+            round(
+                horizontal_break_feet * 12,
+                1,
+            )
+            if horizontal_break_feet is not None
+            else None
+        )
+
+        average_vertical_break = (
+            round(
+                vertical_break_feet * 12,
+                1,
+            )
+            if vertical_break_feet is not None
+            else None
+        )
+
         arsenal.append(
             {
-                "pitch_type": str(pitch_type),
+                "pitch_type": str(
+                    pitch_type
+                ),
                 "pitch_count": pitch_count,
                 "usage_percent": safe_percentage(
                     pitch_count,
                     total_pitches,
                 ),
                 "average_velocity": safe_mean(
-                    group["release_velocity"]
+                    group[
+                        "release_velocity"
+                    ]
                 ),
                 "maximum_velocity": (
                     round(
                         float(
                             pd.to_numeric(
-                                group["release_velocity"],
+                                group[
+                                    "release_velocity"
+                                ],
                                 errors="coerce",
                             ).max()
                         ),
                         1,
                     )
-                    if group["release_velocity"]
+                    if group[
+                        "release_velocity"
+                    ]
                     .notna()
                     .any()
                     else None
                 ),
                 "average_spin_rate": safe_mean(
-                    group["release_spin_rate"],
+                    group[
+                        "release_spin_rate"
+                    ],
                     decimals=0,
                 ),
                 "average_extension": safe_mean(
-                    group["release_extension"]
+                    group[
+                        "release_extension"
+                    ]
                 ),
+
+                # Movement in inches
+                "average_horizontal_break": (
+                    average_horizontal_break
+                ),
+                "average_vertical_break": (
+                    average_vertical_break
+                ),
+
                 "strike_rate": safe_percentage(
                     strike_count,
                     pitch_count,
@@ -402,25 +489,33 @@ def calculate_pitch_arsenal(
                     out_of_zone_count,
                 ),
                 "average_exit_velocity": safe_mean(
-                    batted_balls["exit_velocity"]
+                    batted_balls[
+                        "exit_velocity"
+                    ]
                 ),
                 "hard_hit_rate": safe_percentage(
                     hard_hit_count,
                     len(batted_balls),
                 ),
                 "expected_woba_allowed": safe_mean(
-                    group["expected_woba"],
+                    group[
+                        "expected_woba"
+                    ],
                     decimals=3,
                 ),
                 "expected_slugging_allowed": safe_mean(
-                    group["expected_slugging"],
+                    group[
+                        "expected_slugging"
+                    ],
                     decimals=3,
                 ),
             }
         )
 
     arsenal.sort(
-        key=lambda item: item["pitch_count"],
+        key=lambda item: item[
+            "pitch_count"
+        ],
         reverse=True,
     )
 

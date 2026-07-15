@@ -124,95 +124,138 @@ SELECT
     sp.pitch_id,
     sp.game_pk,
     sp.game_date,
-    g.season,
+
     g.game_type,
     g.park_id,
     park.park_name,
+
     g.home_team_id,
     home_team.abbreviation AS home_team,
+
     g.away_team_id,
     away_team.abbreviation AS away_team,
+
     sp.plate_appearance_number,
     sp.at_bat_number,
     sp.pitch_number,
     sp.inning,
     sp.inning_half,
     sp.outs,
+
     sp.ball_count,
     sp.strike_count,
+
     sp.batter_id,
     batter.full_name AS batter_name,
     batter.bats AS batter_side,
+    batter.bats AS stand,
+
     sp.pitcher_id,
     pitcher.full_name AS pitcher_name,
     pitcher.throws AS pitcher_throws,
+
     sp.pitch_type,
+    sp.pitch_description,
+
     sp.release_velocity,
     sp.release_spin_rate,
     sp.release_extension,
+
     sp.release_pos_x,
     sp.release_pos_y,
     sp.release_pos_z,
+
     sp.vx0,
     sp.vy0,
     sp.vz0,
+
     sp.ax,
     sp.ay,
     sp.az,
+
     sp.effective_speed,
+
     sp.plate_crossing_x,
     sp.plate_crossing_z,
+
     sp.sz_top,
-    sp.sz_bot,
+    sp.sz_bot AS sz_bottom,
+
     sp.runner_on_first,
     sp.runner_on_second,
     sp.runner_on_third,
+
     sp.home_score,
     sp.away_score,
+
     sp.play_event,
+    sp.play_event AS events,
     sp.play_description,
+
     sp.exit_velocity,
+    sp.exit_velocity AS launch_speed,
+
     sp.launch_angle,
     sp.hit_distance,
     sp.spray_angle,
     sp.hit_location_x,
     sp.hit_location_y,
+
     sp.expected_woba,
+    sp.expected_woba AS estimated_woba_using_speedangle,
+
     sp.expected_slugging,
+    sp.expected_slugging AS estimated_slg_using_speedangle,
+
     sp.is_hard_hit,
     sp.is_sweet_spot,
+
     g.temperature_f,
     g.sky_condition,
     g.wind_speed_mph,
     g.wind_direction,
-    park.elevation,
-    sp.pitch_description
+
+    park.elevation
+
 FROM public.statcast_pitches AS sp
+
 LEFT JOIN public.games AS g
     ON g.game_pk = sp.game_pk
+
 LEFT JOIN public.players AS pitcher
     ON pitcher.player_id = sp.pitcher_id
+
 LEFT JOIN public.players AS batter
     ON batter.player_id = sp.batter_id
+
 LEFT JOIN public.parks AS park
     ON park.park_id = g.park_id
+
 LEFT JOIN public.teams AS home_team
     ON home_team.team_id = g.home_team_id
+
 LEFT JOIN public.teams AS away_team
     ON away_team.team_id = g.away_team_id
+
 WHERE sp.pitcher_id = :pitcher_id
+
   AND (
         CAST(:season AS INTEGER) IS NULL
         OR g.season = CAST(:season AS INTEGER)
       )
+
   AND (
         CAST(:start_date AS DATE) IS NULL
         OR sp.game_date >= CAST(:start_date AS DATE)
       )
+
   AND (
         CAST(:end_date AS DATE) IS NULL
         OR sp.game_date <= CAST(:end_date AS DATE)
       )
+
+  AND sp.pitch_type IS NOT NULL
+
 ORDER BY
     sp.game_date,
     sp.game_pk,
