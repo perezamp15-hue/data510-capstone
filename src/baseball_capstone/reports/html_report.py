@@ -93,3 +93,16 @@ def render_two_team_game_plan(
     )
 
     return output_path
+def render_full_scouting_report(*, output_path: Path, report_data: dict[str, Any]) -> Path:
+    """Render the complete capstone pitcher and lineup scouting report."""
+    environment = get_template_environment()
+    template = environment.get_template("full_scouting_report.html")
+    template_data = dict(report_data)
+    template_data.setdefault(
+        "generated_at",
+        datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+    )
+    rendered_html = template.render(**template_data)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(rendered_html, encoding="utf-8")
+    return output_path

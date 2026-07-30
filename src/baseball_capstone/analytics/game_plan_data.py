@@ -45,6 +45,70 @@ class PlayerProfile:
     throws: str | None
     position: str | None
 
+@dataclass(frozen=True, slots=True)
+class DataAvailability:
+    """Describe whether enough historical data exists."""
+
+    pitch_count: int
+    feature_count: int
+    has_pitch_data: bool
+    has_sequence_features: bool
+    warning: str | None
+
+def check_data_availability(
+    *,
+    pitcher_id: int,
+    start_date: date,
+    end_date: date,
+) -> DataAvailability:
+    """Check whether the requested pitcher has usable history."""
+    from baseball_capstone.database.models import (
+        PitchSequenceFeature,
+    )
+
+    with session_scope() as session:
+        pitch_count = session.scalar(
+            select(func.count())
+            .select_from(Pitch)
+            .where(Pitch.pitcher_id == pitcher_id)
+            .where(Pitch.game_date.between(start_date, end_date))
+        ) or 0
+
+        feature_count = session.scalar(
+            select(func.count())
+            .select_from(PitchSequenceFeature)
+            .where(
+                PitchSequenceFeature.pitcher_id == pitcher_id
+            )
+            .where(
+                PitchSequenceFeature.game_date.between(
+                    start_date,
+                    end_date,
+                )
+            )
+        ) or 0
+
+    warning = None
+
+    if pitch_count == 0:
+        warning = (
+            "No pitch data is available for this pitcher in the "
+            "requested range. The historical backfill may still "
+            "be running."
+        )
+    elif feature_count == 0:
+        warning = (
+            "Pitch data exists, but pitch-sequence features have "
+            "not yet been built for this range."
+        )
+
+    return DataAvailability(
+        pitch_count=pitch_count,
+        feature_count=feature_count,
+        has_pitch_data=pitch_count > 0,
+        has_sequence_features=feature_count > 0,
+        warning=warning,
+    )
 
 @dataclass(frozen=True, slots=True)
 class ArsenalPitch:
@@ -639,6 +703,11 @@ def build_team_plan(
     start_date: date,
     end_date: date,
 ) -> dict[str, Any]:
+    availability = check_data_availability(
+    pitcher_id=opposing_pitcher.player_id,
+    start_date=start_date,
+    end_date=end_date,
+)
     """Build one team's offensive plan."""
     arsenal = get_pitcher_arsenal(
         pitcher_id=opposing_pitcher.player_id,
@@ -713,4 +782,13 @@ def build_team_plan(
                 "three-pitch optimizer."
             ),
         ],
+        "data_availability": {
+            "pitch_count": availability.pitch_count,
+            "feature_count": availability.feature_count,
+            "has_pitch_data": availability.has_pitch_data,
+            "has_sequence_features": (
+                availability.has_sequence_features
+    ),
+    "warning": availability.warning,
+},
     }

@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{ our_team }} vs. {{ opponent_team }} Full Scouting Report</title>
+<style>
+:root{--navy:#0b1f36;--blue:#173d67;--ink:#17212b;--muted:#657487;--line:#d9e2ea;--panel:#fff;--bg:#f2f5f8;--offense:#8a4b08;--danger:#9f2424;--good:#176b45}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;font-family:Inter,Arial,sans-serif;background:var(--bg);color:var(--ink);line-height:1.45}
+header{background:linear-gradient(120deg,#07182a,#174b78);color:#fff;padding:38px max(22px,calc((100vw - 1320px)/2))}header h1{font-size:38px;margin:0 0 8px}header p{margin:5px 0;color:#e6eef5}
+nav{position:sticky;top:0;z-index:20;background:#fff;border-bottom:1px solid var(--line);padding:11px;text-align:center}nav a{color:var(--blue);text-decoration:none;font-weight:800;font-size:13px;margin:0 9px}
+main{max-width:1320px;margin:auto;padding:24px}section,.hitter-card{background:#fff;border-radius:14px;padding:22px;margin-bottom:22px;box-shadow:0 3px 15px #10243e12}
+h2{margin-top:0;border-bottom:2px solid #e8eef4;padding-bottom:10px}.section-title{display:flex;align-items:center;gap:12px}.badge{padding:7px 11px;border-radius:18px;color:#fff;font-size:12px;font-weight:800}.offense{background:var(--offense)}.defense{background:var(--blue)}
+.dashboard{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:12px}.metric{background:#eef3f7;border-radius:10px;padding:14px}.metric span{display:block;color:var(--muted);font-size:12px}.metric strong{font-size:18px}.metric small{display:block;color:var(--muted);margin-top:4px}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:18px}.three-col{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:9px;border-bottom:1px solid var(--line);text-align:left}th{background:#edf2f6;position:sticky;top:42px}.note{color:var(--muted)}.warning{background:#fff2cf;border-left:4px solid #d39717;padding:11px;border-radius:8px}.good{color:var(--good)}.bad{color:var(--danger)}
+.hitter-card{border-left:5px solid var(--blue)}.hitter-header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.risk{padding:6px 10px;border-radius:16px;background:#eef3f7;font-size:12px;font-weight:800}.summary-box{background:#f7f9fb;border-radius:10px;padding:13px}.tabs{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}button{border:1px solid #b8c6d2;background:#fff;padding:8px 12px;border-radius:20px;cursor:pointer}button.active{background:var(--blue);color:#fff}.tab-panel{display:none}.tab-panel.active{display:block}.bar{height:9px;background:#dde6ed;border-radius:5px;overflow:hidden}.bar i{display:block;height:100%;background:var(--blue)}
+.heatmap{display:grid;grid-template-columns:repeat(5,48px);grid-template-rows:repeat(5,48px);gap:3px;justify-content:center;margin:14px auto}.cell{border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;min-width:0}.cell.empty{background:#dfe6ec;color:#637183}.legend{display:flex;justify-content:center;gap:18px;font-size:12px;color:var(--muted)}
+.sequence{display:flex;flex-wrap:wrap;align-items:center;gap:8px}.pitch-chip{background:#eaf1f7;border:1px solid #c9d7e3;padding:8px 10px;border-radius:9px}.arrow{color:var(--muted);font-weight:800}.method pre{white-space:pre-wrap;overflow:auto;background:#10243e;color:#e8f0f7;padding:14px;border-radius:9px}
+@media(max-width:850px){.two-col,.three-col{grid-template-columns:1fr}nav{display:none}header h1{font-size:30px}th{position:static}}
+</style>
+</head>
+<body>
+<header>
+<h1>{{ our_team }} vs. {{ opponent_team }} Full Scouting Report</h1>
+<p><b>Offensive analysis:</b> {{ offense.pitcher.name }} against all {{ our_team }} hitters</p>
+<p><b>Defensive analysis:</b> {{ defense.pitcher.name }} against all {{ opponent_team }} hitters</p>
+<p>Historical range {{ start_date }} through {{ end_date }} · Generated {{ generated_at }}</p>
+</header>
+<nav><a href="#overview">Overview</a><a href="#opposing-pitcher">Opposing Pitcher</a><a href="#our-lineup">Our Lineup</a><a href="#our-pitcher">Our Pitcher</a><a href="#opponent-lineup">Opponent Lineup</a><a href="#models">Models</a></nav>
+<main>
+<section id="overview">
+<h2>Game Overview</h2>
+<div class="dashboard">
+<div class="metric"><span>Our starter</span><strong>{{ defense.pitcher.name }}</strong><small>{{ defense.pitcher.throws or 'Unknown' }}HP</small></div>
+<div class="metric"><span>Opposing starter</span><strong>{{ offense.pitcher.name }}</strong><small>{{ offense.pitcher.throws or 'Unknown' }}HP</small></div>
+<div class="metric"><span>Our lineup analyzed</span><strong>{{ offense.hitters|length }}</strong><small>batters</small></div>
+<div class="metric"><span>Opponent lineup analyzed</span><strong>{{ defense.hitters|length }}</strong><small>batters</small></div>
+<div class="metric"><span>Pitch model test accuracy</span><strong>{{ '%.1f%%'|format(model_metrics.pitch_type.test.accuracy*100) if model_metrics.pitch_type is defined else 'N/A' }}</strong></div>
+<div class="metric"><span>Pitch model top-3</span><strong>{{ '%.1f%%'|format(model_metrics.pitch_type.test.top_3_accuracy*100) if model_metrics.pitch_type is defined else 'N/A' }}</strong></div>
+</div>
+</section>
+
+{% macro fmt_pct(value) -%}{{ '%.1f%%'|format((value or 0)*100) }}{%- endmacro %}
+{% macro fmt_num(value, digits=2) -%}{% if value is none %}N/A{% else %}{{ (('%.' ~ digits ~ 'f')|format(value)) }}{% endif %}{%- endmacro %}
+{% macro pitcher_section(block, section_id, label) %}
+<section id="{{ section_id }}">
+<div class="section-title"><span class="badge {{ 'offense' if label == 'OPPOSING PITCHER' else 'defense' }}">{{ label }}</span><h2>{{ block.pitcher.name }} Pitcher Profile</h2></div>
+<div class="dashboard">
+<div class="metric"><span>Pitches</span><strong>{{ block.summary.pitch_count }}</strong></div><div class="metric"><span>Games</span><strong>{{ block.summary.games or 0 }}</strong></div>
+<div class="metric"><span>Estimated innings</span><strong>{{ fmt_num(block.summary.innings_est,1) }}</strong></div><div class="metric"><span>Estimated WHIP</span><strong>{{ fmt_num(block.summary.whip_est,2) }}</strong></div>
+<div class="metric"><span>Strikeouts</span><strong>{{ block.summary.strikeouts or 0 }}</strong><small>{{ fmt_pct(block.summary.k_rate) }} of PA</small></div>
+<div class="metric"><span>Walks</span><strong>{{ block.summary.walks or 0 }}</strong><small>{{ fmt_pct(block.summary.bb_rate) }} of PA</small></div>
+<div class="metric"><span>Strike rate</span><strong>{{ fmt_pct(block.summary.strike_rate) }}</strong></div><div class="metric"><span>First-pitch strike</span><strong>{{ fmt_pct(block.summary.first_pitch_strike_rate) }}</strong></div>
+<div class="metric"><span>Whiff rate</span><strong>{{ fmt_pct(block.summary.whiff_rate) }}</strong></div><div class="metric"><span>Zone rate</span><strong>{{ fmt_pct(block.summary.zone_rate) }}</strong></div>
+<div class="metric"><span>Contact rate</span><strong>{{ fmt_pct(block.summary.contact_rate) }}</strong></div><div class="metric"><span>Hard-hit rate</span><strong>{{ fmt_pct(block.summary.hard_hit_rate) }}</strong></div>
+<div class="metric"><span>Average exit velocity</span><strong>{{ fmt_num(block.summary.avg_exit_velocity,1) }}</strong><small>mph</small></div><div class="metric"><span>Expected wOBA</span><strong>{{ fmt_num(block.summary.xwoba,3) }}</strong></div>
+</div>
+<p class="warning"><b>Data note:</b> {{ block.summary.warning }}</p>
+<h3>Pitch Arsenal</h3>
+<table><thead><tr><th>Pitch</th><th>Count</th><th>Usage</th><th>Velo</th><th>Spin</th><th>Strike</th><th>Whiff</th><th>Zone</th><th>Hard hit</th><th>xwOBA</th></tr></thead><tbody>
+{% for p in block.arsenal %}<tr><td><b>{{ p.code }}</b> — {{ p.name }}</td><td>{{ p.count }}</td><td>{{ fmt_pct(p.usage) }}</td><td>{{ fmt_num(p.velocity,1) }}</td><td>{{ fmt_num(p.spin,0) }}</td><td>{{ fmt_pct(p.strike_rate) }}</td><td>{{ fmt_pct(p.whiff_rate) }}</td><td>{{ fmt_pct(p.zone_rate) }}</td><td>{{ fmt_pct(p.hard_hit_rate) }}</td><td>{{ fmt_num(p.xwoba,3) }}</td></tr>{% endfor %}
+</tbody></table>
+</section>
+{% endmacro %}
+
+{{ pitcher_section(offense, 'opposing-pitcher', 'OPPOSING PITCHER') }}
+
+<section id="our-lineup"><div class="section-title"><span class="badge offense">OUR OFFENSE</span><h2>{{ our_team }} Hitters vs. {{ offense.pitcher.name }}</h2></div>
+<p>Every hitter card combines the batter's historical pitch-type and location weaknesses with the model's most likely pitch, location, outcome, and sequence path.</p></section>
+{% for hitter in offense.hitters %}{% include 'full_scouting_hitter_card.html' %}{% endfor %}
+
+{{ pitcher_section(defense, 'our-pitcher', 'OUR PITCHER') }}
+
+<section id="opponent-lineup"><div class="section-title"><span class="badge defense">OUR DEFENSE</span><h2>{{ defense.pitcher.name }} vs. {{ opponent_team }} Hitters</h2></div>
+<p>These cards identify where each opposing batter has struggled and what the deterministic model considers most likely to occur.</p></section>
+{% for hitter in defense.hitters %}{% include 'full_scouting_hitter_card.html' %}{% endfor %}
+
+<section id="models" class="method"><h2>Model Performance and Interpretation</h2>
+<div class="three-col">
+{% for key,label in [('pitch_type','Pitch type'),('location','Location'),('outcome','Outcome')] %}{% set m=model_metrics.get(key,{}) %}<article class="summary-box"><h3>{{ label }}</h3><p>Test accuracy: <b>{{ fmt_pct(m.get('test',{}).get('accuracy',0)) }}</b></p><p>Top-3 accuracy: <b>{{ fmt_pct(m.get('test',{}).get('top_3_accuracy',0)) }}</b></p><p>Log loss: <b>{{ fmt_num(m.get('test',{}).get('log_loss'),3) }}</b></p></article>{% endfor %}
+</div>
+<p class="warning"><b>Interpretation:</b> Sequence paths describe likely historical/model behavior and associated outcomes. They are not guarantees or mandatory pitch calls.</p>
+</section>
+</main>
+<script>
+document.querySelectorAll('.tabs').forEach(group=>group.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;const card=group.closest('.hitter-card');group.querySelectorAll('button').forEach(x=>x.classList.remove('active'));card.querySelectorAll('.tab-panel').forEach(x=>x.classList.remove('active'));b.classList.add('active');card.querySelector('[data-panel="'+b.dataset.tab+'"]').classList.add('active')}));
+</script>
+</body></html>

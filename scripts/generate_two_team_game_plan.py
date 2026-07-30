@@ -246,6 +246,21 @@ def main() -> int:
     print(f"Two-team HTML report created: {output_path.resolve()}")
     return 0
 
+warnings = []
+
+for team_plan in [
+    away_offense_plan,
+    home_offense_plan,
+]:
+    warning = (
+        team_plan.get("data_availability", {})
+        .get("warning")
+    )
+
+    if warning:
+        warnings.append(
+            f"{team_plan['offense_team']}: {warning}"
+        )
 
 if __name__ == "__main__":
     raise SystemExit(main())

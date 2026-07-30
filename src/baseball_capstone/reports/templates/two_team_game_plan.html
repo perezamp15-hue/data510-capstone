@@ -380,6 +380,29 @@
 </header>
 
 {% for plan in team_plans %}
+{% if plan.data_availability.warning %}
+<div
+    class="card"
+    style="
+        margin-top: 14px;
+        border-left: 5px solid #a15c00;
+        background: #fff8eb;
+    "
+>
+    <strong>Data availability warning</strong>
+
+    <p style="margin-bottom: 0;">
+        {{ plan.data_availability.warning }}
+    </p>
+
+    <p class="team-meta">
+        Pitch rows available:
+        {{ plan.data_availability.pitch_count }}
+        · Sequence feature rows:
+        {{ plan.data_availability.feature_count }}
+    </p>
+</div>
+{% endif %}
 <section class="section">
 
     <article class="card">

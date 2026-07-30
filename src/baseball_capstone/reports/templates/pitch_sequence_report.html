@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>{{ report_title }}</title>
+
+    <style>
+        :root {
+            --background: #f3f5f8;
+            --surface: #ffffff;
+            --surface-soft: #f8fafc;
+            --text: #172033;
+            --muted: #637083;
+            --border: #dbe2ea;
+            --accent: #173b67;
+            --accent-soft: #e8f0fa;
+            --success: #18794e;
+            --warning: #a15c00;
+            --danger: #b42318;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            background: var(--background);
+            color: var(--text);
+            font-family:
+                -apple-system,
+                BlinkMacSystemFont,
+                "Segoe UI",
+                sans-serif;
+            line-height: 1.5;
+        }
+
+        .page {
+            width: min(1440px, calc(100% - 32px));
+            margin: 24px auto 48px;
+        }
+
+        .hero {
+            background: linear-gradient(
+                135deg,
+                #102a4a,
+                #285b8f
+            );
+            color: white;
+            border-radius: 18px;
+            padding: 32px;
+            box-shadow: 0 12px 32px rgba(16, 42, 74, 0.2);
+        }
+
+        .hero h1 {
+            margin: 0 0 8px;
+            font-size: clamp(28px, 4vw, 46px);
+        }
+
+        .hero p {
+            margin: 4px 0;
+            color: rgba(255, 255, 255, 0.82);
+        }
+
+        .hero-grid {
+            display: grid;
+            grid-template-columns:
+                repeat(auto-fit, minmax(180px, 1fr));
+            gap: 16px;
+            margin-top: 24px;
+        }
+
+        .hero-stat {
+            padding: 16px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            border-radius: 12px;
+        }
+
+        .hero-stat-label {
+            display: block;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        .hero-stat-value {
+            display: block;
+            margin-top: 5px;
+            font-size: 20px;
+            font-weight: 700;
+        }
+
+        .section {
+            margin-top: 24px;
+        }
+
+        .section-heading {
+            display: flex;
+            justify-content: space-between;
+            align-items: end;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .section-heading h2 {
+            margin: 0;
+            font-size: 24px;
+        }
+
+        .section-heading p {
+            margin: 0;
+            color: var(--muted);
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns:
+                repeat(auto-fit, minmax(300px, 1fr));
+            gap: 18px;
+        }
+
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 20px;
+            box-shadow: 0 4px 14px rgba(26, 42, 66, 0.06);
+        }
+
+        .card h3 {
+            margin: 0 0 14px;
+            font-size: 18px;
+        }
+
+        .muted {
+            color: var(--muted);
+        }
+
+        .probability-row {
+            margin: 14px 0;
+        }
+
+        .probability-header {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 6px;
+        }
+
+        .probability-track {
+            height: 12px;
+            background: #e8edf3;
+            border-radius: 999px;
+            overflow: hidden;
+        }
+
+        .probability-fill {
+            height: 100%;
+            border-radius: inherit;
+            background: linear-gradient(
+                90deg,
+                #1d4f7c,
+                #4d8bc2
+            );
+        }
+
+        .sequence-card {
+            position: relative;
+        }
+
+        .sequence-rank {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            padding: 5px 10px;
+            border-radius: 999px;
+            background: var(--accent-soft);
+            color: var(--accent);
+            font-weight: 700;
+            font-size: 13px;
+        }
+
+        .sequence-step {
+            display: grid;
+            grid-template-columns: 36px 1fr;
+            gap: 10px;
+            align-items: start;
+            margin: 13px 0;
+        }
+
+        .step-number {
+            width: 32px;
+            height: 32px;
+            display: grid;
+            place-items: center;
+            border-radius: 50%;
+            background: var(--accent);
+            color: white;
+            font-weight: 700;
+        }
+
+        .metrics {
+            display: grid;
+            grid-template-columns:
+                repeat(auto-fit, minmax(120px, 1fr));
+            gap: 10px;
+            margin-top: 18px;
+        }
+
+        .metric {
+            padding: 12px;
+            background: var(--surface-soft);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+        }
+
+        .metric-label {
+            display: block;
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .metric-value {
+            display: block;
+            margin-top: 4px;
+            font-size: 18px;
+            font-weight: 700;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th,
+        td {
+            padding: 10px 8px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+
+        th {
+            color: var(--muted);
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .pill {
+            display: inline-block;
+            padding: 4px 9px;
+            border-radius: 999px;
+            background: var(--accent-soft);
+            color: var(--accent);
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .method-list {
+            margin: 0;
+            padding-left: 20px;
+        }
+
+        .method-list li {
+            margin-bottom: 8px;
+        }
+
+        footer {
+            margin-top: 28px;
+            padding: 18px;
+            color: var(--muted);
+            text-align: center;
+            font-size: 13px;
+        }
+
+        @media print {
+            body {
+                background: white;
+            }
+
+            .page {
+                width: 100%;
+                margin: 0;
+            }
+
+            .hero,
+            .card {
+                box-shadow: none;
+            }
+
+            .card {
+                break-inside: avoid;
+            }
+        }
+    </style>
+</head>
+
+<body>
+<main class="page">
+
+    <header class="hero">
+        <h1>{{ report_title }}</h1>
+
+        <p>
+            {{ pitcher.name }} vs. {{ batter.name }}
+        </p>
+
+        <p>
+            Generated {{ generated_at }}
+            · Model version {{ model_version }}
+        </p>
+
+        <div class="hero-grid">
+            <div class="hero-stat">
+                <span class="hero-stat-label">Pitcher</span>
+                <span class="hero-stat-value">
+                    {{ pitcher.name }}
+                </span>
+            </div>
+
+            <div class="hero-stat">
+                <span class="hero-stat-label">Batter</span>
+                <span class="hero-stat-value">
+                    {{ batter.name }}
+                </span>
+            </div>
+
+            <div class="hero-stat">
+                <span class="hero-stat-label">Matchup</span>
+                <span class="hero-stat-value">
+                    {{ pitcher.throws }}HP vs.
+                    {{ batter.bats }}HB
+                </span>
+            </div>
+
+            <div class="hero-stat">
+                <span class="hero-stat-label">
+                    Historical pitches
+                </span>
+                <span class="hero-stat-value">
+                    {{ historical_sample }}
+                </span>
+            </div>
+        </div>
+    </header>
+
+    <section class="section">
+        <div class="section-heading">
+            <div>
+                <h2>Predicted opposing approach</h2>
+                <p>
+                    Most likely next pitches based on the
+                    current count and sequence context.
+                </p>
+            </div>
+        </div>
+
+        <div class="grid">
+            <div class="card">
+                <h3>Next-pitch probabilities</h3>
+
+                {% for prediction in pitch_predictions %}
+                <div class="probability-row">
+                    <div class="probability-header">
+                        <strong>
+                            {{ prediction.pitch_name }}
+                        </strong>
+
+                        <span>
+                            {{ "%.1f"|format(
+                                prediction.probability * 100
+                            ) }}%
+                        </span>
+                    </div>
+
+                    <div class="probability-track">
+                        <div
+                            class="probability-fill"
+                            style="
+                                width:
+                                {{ prediction.probability * 100 }}%;
+                            "
+                        ></div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+
+            <div class="card">
+                <h3>Current context</h3>
+
+                <table>
+                    <tbody>
+                    <tr>
+                        <th>Count</th>
+                        <td>
+                            {{ context.balls }}-{{ context.strikes }}
+                        </td>
+                    </tr>
+
+                    <tr>
+                        <th>Previous pitch</th>
+                        <td>
+                            {{ context.previous_pitch_type or "None" }}
+                        </td>
+                    </tr>
+
+                    <tr>
+                        <th>Previous location</th>
+                        <td>
+                            {{ context.previous_pitch_zone or "None" }}
+                        </td>
+                    </tr>
+
+                    <tr>
+                        <th>Inning</th>
+                        <td>
+                            {{ context.inning }}
+                            {{ context.inning_half }}
+                        </td>
+                    </tr>
+
+                    <tr>
+                        <th>Outs</th>
+                        <td>{{ context.outs }}</td>
+                    </tr>
+
+                    <tr>
+                        <th>Model confidence</th>
+                        <td>
+                            {{ "%.1f"|format(
+                                prediction_confidence * 100
+                            ) }}%
+                        </td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <section class="section">
+        <div class="section-heading">
+            <div>
+                <h2>Recommended pitch sequences</h2>
+                <p>
+                    Ranked attack plans based on pitcher strengths,
+                    batter weaknesses, and expected outcomes.
+                </p>
+            </div>
+        </div>
+
+        <div class="grid">
+            {% for sequence in recommended_sequences %}
+            <article class="card sequence-card">
+                <span class="sequence-rank">
+                    Rank {{ sequence.rank }}
+                </span>
+
+                <h3>{{ sequence.name }}</h3>
+
+                {% for pitch in sequence.pitches %}
+                <div class="sequence-step">
+                    <div class="step-number">
+                        {{ loop.index }}
+                    </div>
+
+                    <div>
+                        <strong>
+                            {{ pitch.pitch_name }}
+                        </strong>
+
+                        <div class="muted">
+                            {{ pitch.zone }}
+                        </div>
+
+                        <div>
+                            {{ pitch.reason }}
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+
+                <div class="metrics">
+                    <div class="metric">
+                        <span class="metric-label">
+                            Sequence score
+                        </span>
+                        <span class="metric-value">
+                            {{ "%.1f"|format(sequence.score) }}
+                        </span>
+                    </div>
+
+                    <div class="metric">
+                        <span class="metric-label">
+                            Whiff probability
+                        </span>
+                        <span class="metric-value">
+                            {{ "%.1f"|format(
+                                sequence.whiff_probability * 100
+                            ) }}%
+                        </span>
+                    </div>
+
+                    <div class="metric">
+                        <span class="metric-label">
+                            Expected wOBA
+                        </span>
+                        <span class="metric-value">
+                            {{ "%.3f"|format(
+                                sequence.expected_woba
+                            ) }}
+                        </span>
+                    </div>
+                </div>
+            </article>
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="section">
+        <div class="section-heading">
+            <div>
+                <h2>Pitcher arsenal</h2>
+                <p>
+                    Available pitches and current performance profile.
+                </p>
+            </div>
+        </div>
+
+        <div class="card">
+            <table>
+                <thead>
+                <tr>
+                    <th>Pitch</th>
+                    <th>Usage</th>
+                    <th>Velocity</th>
+                    <th>Whiff rate</th>
+                    <th>Zone rate</th>
+                </tr>
+                </thead>
+
+                <tbody>
+                {% for pitch in pitcher_arsenal %}
+                <tr>
+                    <td>
+                        <span class="pill">
+                            {{ pitch.pitch_name }}
+                        </span>
+                    </td>
+                    <td>
+                        {{ "%.1f"|format(pitch.usage * 100) }}%
+                    </td>
+                    <td>
+                        {{ "%.1f"|format(pitch.velocity) }} mph
+                    </td>
+                    <td>
+                        {{ "%.1f"|format(pitch.whiff_rate * 100) }}%
+                    </td>
+                    <td>
+                        {{ "%.1f"|format(pitch.zone_rate * 100) }}%
+                    </td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="section">
+        <div class="section-heading">
+            <div>
+                <h2>Batter vulnerability profile</h2>
+                <p>
+                    Batter performance by pitch family.
+                </p>
+            </div>
+        </div>
+
+        <div class="card">
+            <table>
+                <thead>
+                <tr>
+                    <th>Pitch family</th>
+                    <th>Pitches seen</th>
+                    <th>Whiff rate</th>
+                    <th>Expected wOBA</th>
+                    <th>Assessment</th>
+                </tr>
+                </thead>
+
+                <tbody>
+                {% for weakness in batter_weaknesses %}
+                <tr>
+                    <td>{{ weakness.pitch_name }}</td>
+                    <td>{{ weakness.pitches_seen }}</td>
+                    <td>
+                        {{ "%.1f"|format(
+                            weakness.whiff_rate * 100
+                        ) }}%
+                    </td>
+                    <td>
+                        {{ "%.3f"|format(
+                            weakness.expected_woba
+                        ) }}
+                    </td>
+                    <td>{{ weakness.assessment }}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="section">
+        <div class="section-heading">
+            <div>
+                <h2>Methodology and limitations</h2>
+            </div>
+        </div>
+
+        <div class="card">
+            <ul class="method-list">
+                {% for item in methodology %}
+                <li>{{ item }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+    </section>
+
+    <footer>
+        MLB Pitch Strategy Engine ·
+        Academic capstone report ·
+        {{ generated_at }}
+    </footer>
+
+</main>
+</body>
+</html>

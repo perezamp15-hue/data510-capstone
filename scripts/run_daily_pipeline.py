@@ -10,7 +10,9 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
 from time import perf_counter
-
+from baseball_capstone.features.pitch_sequences import (
+    build_pitch_sequence_features,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_DIRECTORY = PROJECT_ROOT / "src"
@@ -26,6 +28,13 @@ from baseball_capstone.collectors.players import collect_players
 from baseball_capstone.collectors.teams import collect_teams
 from baseball_capstone.collectors.run_tracking import CollectionMetrics
 
+feature_result = run_collector_step(
+    "pitch-sequence-features",
+    build_pitch_sequence_features,
+    start_date=pitch_start_date,
+    end_date=target_date,
+)
+results.append(feature_result)
 
 LOGGER = logging.getLogger(__name__)
 

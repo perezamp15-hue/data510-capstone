@@ -16,11 +16,13 @@ if str(SOURCE_DIRECTORY) not in sys.path:
     sys.path.insert(0, str(SOURCE_DIRECTORY))
 
 
-from baseball_capstone.collectors.pitches import collect_pitches
+from baseball_capstone.collectors.pitches import (
+    collect_pitches,
+)
 
 
-def iso_date(value: str) -> date:
-    """Parse a YYYY-MM-DD command-line date."""
+def parse_date(value: str) -> date:
+    """Parse a date in YYYY-MM-DD format."""
     try:
         return date.fromisoformat(value)
     except ValueError as exc:
@@ -32,18 +34,20 @@ def iso_date(value: str) -> date:
 def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description="Collect MLB pitch-by-pitch data into PostgreSQL."
+        description=(
+            "Collect MLB pitch-by-pitch data into PostgreSQL."
+        )
     )
 
     parser.add_argument(
         "--start-date",
-        type=iso_date,
+        type=parse_date,
         help="Inclusive start date in YYYY-MM-DD format.",
     )
 
     parser.add_argument(
         "--end-date",
-        type=iso_date,
+        type=parse_date,
         help="Inclusive end date in YYYY-MM-DD format.",
     )
 
@@ -64,15 +68,39 @@ def parse_arguments() -> argparse.Namespace:
     )
 
     parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help=(
+            "Number of games processed concurrently. "
+            "Recommended: 2-4. Maximum: 8."
+        ),
+    )
+
+    parser.add_argument(
         "--force",
         action="store_true",
-        help="Reprocess games already marked as collected.",
+        help=(
+            "Reprocess games already marked as collected."
+        ),
     )
 
     parser.add_argument(
         "--replace",
         action="store_true",
-        help="Delete and rebuild pitches for each selected game.",
+        help=(
+            "Delete and rebuild stored pitches for each "
+            "selected game."
+        ),
+    )
+
+    parser.add_argument(
+        "--store-raw-payload",
+        action="store_true",
+        help=(
+            "Store the raw JSON for every pitch. This increases "
+            "database storage and slows large backfills."
+        ),
     )
 
     parser.add_argument(
@@ -87,20 +115,31 @@ def parse_arguments() -> argparse.Namespace:
 def resolve_dates(
     arguments: argparse.Namespace,
 ) -> tuple[date, date]:
-    """Resolve the requested collection dates."""
+    """Resolve the requested collection range."""
     if arguments.start_date or arguments.end_date:
-        if not arguments.start_date or not arguments.end_date:
+        if (
+            arguments.start_date is None
+            or arguments.end_date is None
+        ):
             raise ValueError(
-                "--start-date and --end-date must be used together."
+                "--start-date and --end-date must be "
+                "used together."
             )
 
-        return arguments.start_date, arguments.end_date
+        return (
+            arguments.start_date,
+            arguments.end_date,
+        )
 
     if arguments.days_back < 0:
-        raise ValueError("--days-back cannot be negative.")
+        raise ValueError(
+            "--days-back cannot be negative."
+        )
 
     end_date = date.today()
-    start_date = end_date - timedelta(days=arguments.days_back)
+    start_date = end_date - timedelta(
+        days=arguments.days_back
+    )
 
     return start_date, end_date
 
@@ -110,10 +149,14 @@ def main() -> int:
     arguments = parse_arguments()
 
     logging.basicConfig(
-        level=logging.DEBUG if arguments.verbose else logging.INFO,
+        level=(
+            logging.DEBUG
+            if arguments.verbose
+            else logging.INFO
+        ),
         format=(
             "%(asctime)s | %(levelname)s | "
-            "%(name)s | %(message)s"
+            "%(threadName)s | %(name)s | %(message)s"
         ),
     )
 
@@ -126,21 +169,42 @@ def main() -> int:
             force=arguments.force,
             replace=arguments.replace,
             limit=arguments.limit,
+            workers=arguments.workers,
+            store_raw_payload=(
+                arguments.store_raw_payload
+            ),
         )
 
     except Exception as exc:
-        logging.exception("Pitch collection failed: %s", exc)
+        logging.exception(
+            "Pitch collection failed: %s",
+            exc,
+        )
         return 1
 
     print()
-    print("Pitch collection finished")
-    print(f"Date range:       {start_date} through {end_date}")
+    print("=" * 64)
+    print("PITCH COLLECTION FINISHED")
+    print("=" * 64)
+    print(
+        f"Date range:       "
+        f"{start_date} through {end_date}"
+    )
+    print(f"Workers:          {arguments.workers}")
     print(f"Games selected:   {metrics.records_read}")
     print(f"Pitches inserted: {metrics.records_inserted}")
     print(f"Pitches updated:  {metrics.records_updated}")
     print(f"Games failed:     {metrics.records_rejected}")
+    print(
+        "Raw payloads:     "
+        f"{'stored' if arguments.store_raw_payload else 'disabled'}"
+    )
 
-    return 0
+    return (
+        1
+        if metrics.records_rejected > 0
+        else 0
+    )
 
 
 if __name__ == "__main__":
