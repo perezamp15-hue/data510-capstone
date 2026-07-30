@@ -20,7 +20,7 @@ from baseball_capstone.database.models import PitchSequenceFeature
 
 
 def main() -> int:
-    """Check feature counts, duplicates, and values."""
+    """Validate sequence feature rows."""
     with session_scope() as session:
         row_count = session.scalar(
             select(func.count())
@@ -61,6 +61,14 @@ def main() -> int:
             )
         ) or 0
 
+        missing_zones = session.scalar(
+            select(func.count())
+            .select_from(PitchSequenceFeature)
+            .where(
+                PitchSequenceFeature.target_pitch_zone.is_(None)
+            )
+        ) or 0
+
         zone_counts = session.execute(
             select(
                 PitchSequenceFeature.target_pitch_zone,
@@ -69,9 +77,19 @@ def main() -> int:
             .group_by(
                 PitchSequenceFeature.target_pitch_zone
             )
-            .order_by(
-                func.count().desc()
+            .order_by(func.count().desc())
+        ).all()
+
+        pitch_type_counts = session.execute(
+            select(
+                PitchSequenceFeature.target_pitch_type,
+                func.count().label("row_count"),
             )
+            .group_by(
+                PitchSequenceFeature.target_pitch_type
+            )
+            .order_by(func.count().desc())
+            .limit(15)
         ).all()
 
         sample_rows = session.execute(
@@ -99,12 +117,19 @@ def main() -> int:
     print(f"Duplicate sequence keys: {len(duplicate_keys)}")
     print(f"Invalid count states: {invalid_counts}")
     print(f"Missing pitch-type targets: {missing_targets}")
+    print(f"Missing target zones: {missing_zones}")
 
     print()
     print("Target zone distribution:")
 
     for zone, count in zone_counts:
         print(f"  {zone or 'missing':<15} {count:>8}")
+
+    print()
+    print("Top pitch types:")
+
+    for pitch_type, count in pitch_type_counts:
+        print(f"  {pitch_type:<10} {count:>8}")
 
     print()
     print("Sample sequence rows:")
@@ -138,7 +163,7 @@ def main() -> int:
         print("\nFailure: target pitch types are missing.")
         return 1
 
-    print("\nPitch sequence feature verification succeeded.")
+    print("\nPitch-sequence feature verification succeeded.")
     return 0
 
 

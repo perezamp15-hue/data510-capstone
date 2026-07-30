@@ -1,4 +1,4 @@
-"""Build next-pitch prediction features from PostgreSQL pitch data."""
+"""Build pitch-sequence model features from stored pitch data."""
 
 from __future__ import annotations
 
@@ -16,12 +16,24 @@ LOGGER = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class FeatureBuildResult:
-    """Summary of one feature-table refresh."""
+    """Summary of one feature-table build."""
 
     start_date: date
     end_date: date
+    source_pitches: int
     rows_deleted: int
     rows_inserted: int
+
+
+COUNT_SOURCE_SQL = text(
+    """
+    SELECT COUNT(*)
+    FROM pitches
+    WHERE game_date BETWEEN :start_date AND :end_date
+      AND is_pitch IS TRUE
+      AND pitch_type IS NOT NULL
+    """
+)
 
 
 DELETE_FEATURES_SQL = text(
@@ -43,42 +55,46 @@ INSERT_FEATURES_SQL = text(
             p.pitch_number,
             p.pitcher_id,
             p.batter_id,
+
             pitcher.throws AS pitcher_hand,
             batter.bats AS batter_side,
+
             p.inning,
             p.inning_half,
             p.outs,
             p.balls,
             p.strikes,
+
             p.pitch_type,
             p.pitch_name,
             p.description,
+
             p.plate_x,
             p.plate_z,
             p.strike_zone_top,
             p.strike_zone_bottom,
             p.release_speed,
+
             p.is_ball,
             p.is_strike,
             p.is_in_play,
-            p.runner_on_first,
-            p.runner_on_second,
-            p.runner_on_third,
+
+            COALESCE(p.runner_on_first, FALSE) AS runner_on_first,
+            COALESCE(p.runner_on_second, FALSE) AS runner_on_second,
+            COALESCE(p.runner_on_third, FALSE) AS runner_on_third,
 
             CASE
-                WHEN
-                    p.plate_x IS NULL
-                    OR p.plate_z IS NULL
-                    OR p.strike_zone_top IS NULL
-                    OR p.strike_zone_bottom IS NULL
-                    OR p.strike_zone_top <= p.strike_zone_bottom
+                WHEN p.plate_x IS NULL
+                  OR p.plate_z IS NULL
+                  OR p.strike_zone_top IS NULL
+                  OR p.strike_zone_bottom IS NULL
+                  OR p.strike_zone_top <= p.strike_zone_bottom
                 THEN NULL
 
-                WHEN
-                    p.plate_x < -0.95
-                    OR p.plate_x > 0.95
-                    OR p.plate_z < p.strike_zone_bottom
-                    OR p.plate_z > p.strike_zone_top
+                WHEN p.plate_x < -0.95
+                  OR p.plate_x > 0.95
+                  OR p.plate_z < p.strike_zone_bottom
+                  OR p.plate_z > p.strike_zone_top
                 THEN 'chase'
 
                 WHEN p.plate_z >= (
@@ -151,14 +167,14 @@ INSERT_FEATURES_SQL = text(
         FROM pitches AS p
 
         JOIN players AS pitcher
-            ON pitcher.player_id = p.pitcher_id
+          ON pitcher.player_id = p.pitcher_id
 
         JOIN players AS batter
-            ON batter.player_id = p.batter_id
+          ON batter.player_id = p.batter_id
 
         WHERE p.game_date BETWEEN :start_date AND :end_date
-          AND p.pitch_type IS NOT NULL
           AND p.is_pitch IS TRUE
+          AND p.pitch_type IS NOT NULL
     ),
 
     sequenced AS (
@@ -280,9 +296,9 @@ INSERT_FEATURES_SQL = text(
         second_previous_pitch_type,
         second_previous_pitch_zone,
         third_previous_pitch_type,
-        COALESCE(runner_on_first, FALSE),
-        COALESCE(runner_on_second, FALSE),
-        COALESCE(runner_on_third, FALSE),
+        runner_on_first,
+        runner_on_second,
+        runner_on_third,
         pitch_type,
         pitch_name,
         target_pitch_zone,
@@ -295,46 +311,6 @@ INSERT_FEATURES_SQL = text(
         is_in_play
 
     FROM sequenced
-
-    ON CONFLICT (
-        game_pk,
-        at_bat_number,
-        pitch_number
-    )
-    DO UPDATE SET
-        game_date = EXCLUDED.game_date,
-        season = EXCLUDED.season,
-        pitcher_id = EXCLUDED.pitcher_id,
-        batter_id = EXCLUDED.batter_id,
-        pitcher_hand = EXCLUDED.pitcher_hand,
-        batter_side = EXCLUDED.batter_side,
-        inning = EXCLUDED.inning,
-        inning_half = EXCLUDED.inning_half,
-        outs_before_pitch = EXCLUDED.outs_before_pitch,
-        balls_before_pitch = EXCLUDED.balls_before_pitch,
-        strikes_before_pitch = EXCLUDED.strikes_before_pitch,
-        previous_pitch_type = EXCLUDED.previous_pitch_type,
-        previous_pitch_zone = EXCLUDED.previous_pitch_zone,
-        previous_pitch_result = EXCLUDED.previous_pitch_result,
-        second_previous_pitch_type =
-            EXCLUDED.second_previous_pitch_type,
-        second_previous_pitch_zone =
-            EXCLUDED.second_previous_pitch_zone,
-        third_previous_pitch_type =
-            EXCLUDED.third_previous_pitch_type,
-        runner_on_first = EXCLUDED.runner_on_first,
-        runner_on_second = EXCLUDED.runner_on_second,
-        runner_on_third = EXCLUDED.runner_on_third,
-        target_pitch_type = EXCLUDED.target_pitch_type,
-        target_pitch_name = EXCLUDED.target_pitch_name,
-        target_pitch_zone = EXCLUDED.target_pitch_zone,
-        target_plate_x = EXCLUDED.target_plate_x,
-        target_plate_z = EXCLUDED.target_plate_z,
-        target_release_speed = EXCLUDED.target_release_speed,
-        target_description = EXCLUDED.target_description,
-        target_is_ball = EXCLUDED.target_is_ball,
-        target_is_strike = EXCLUDED.target_is_strike,
-        target_is_in_play = EXCLUDED.target_is_in_play
     """
 )
 
@@ -364,6 +340,11 @@ def build_pitch_sequence_features(
     }
 
     with session_scope() as session:
+        source_pitches = session.scalar(
+            COUNT_SOURCE_SQL,
+            parameters,
+        ) or 0
+
         delete_result = session.execute(
             DELETE_FEATURES_SQL,
             parameters,
@@ -371,10 +352,11 @@ def build_pitch_sequence_features(
 
         rows_deleted = max(delete_result.rowcount or 0, 0)
 
-        session.execute(
-            INSERT_FEATURES_SQL,
-            parameters,
-        )
+        if source_pitches:
+            session.execute(
+                INSERT_FEATURES_SQL,
+                parameters,
+            )
 
         rows_inserted = session.scalar(
             COUNT_FEATURES_SQL,
@@ -382,10 +364,11 @@ def build_pitch_sequence_features(
         ) or 0
 
     LOGGER.info(
-        "Sequence feature build complete: "
-        "start=%s end=%s deleted=%s inserted=%s",
+        "Pitch-sequence features built: "
+        "start=%s end=%s source=%s deleted=%s inserted=%s",
         start_date,
         end_date,
+        source_pitches,
         rows_deleted,
         rows_inserted,
     )
@@ -393,6 +376,7 @@ def build_pitch_sequence_features(
     return FeatureBuildResult(
         start_date=start_date,
         end_date=end_date,
+        source_pitches=source_pitches,
         rows_deleted=rows_deleted,
         rows_inserted=rows_inserted,
     )
