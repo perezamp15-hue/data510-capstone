@@ -470,6 +470,195 @@ class Pitch(Base):
         onupdate=func.now(),
     )
 
+class PitchSequenceFeature(Base):
+    """Training row for next-pitch type and location prediction."""
+
+    __tablename__ = "pitch_sequence_features"
+    __table_args__ = (
+        UniqueConstraint(
+            "game_pk",
+            "at_bat_number",
+            "pitch_number",
+            name="uq_pitch_sequence_game_at_bat_pitch",
+        ),
+        Index(
+            "ix_pitch_sequence_game_date",
+            "game_date",
+        ),
+        Index(
+            "ix_pitch_sequence_season",
+            "season",
+        ),
+        Index(
+            "ix_pitch_sequence_pitcher",
+            "pitcher_id",
+        ),
+        Index(
+            "ix_pitch_sequence_batter",
+            "batter_id",
+        ),
+        Index(
+            "ix_pitch_sequence_count",
+            "balls_before_pitch",
+            "strikes_before_pitch",
+        ),
+        Index(
+            "ix_pitch_sequence_target_type",
+            "target_pitch_type",
+        ),
+    )
+
+    feature_id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    game_pk: Mapped[int] = mapped_column(
+        ForeignKey("games.game_pk", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    game_date: Mapped[date] = mapped_column(
+        Date,
+        nullable=False,
+    )
+
+    season: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    at_bat_number: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    pitch_number: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    pitcher_id: Mapped[int] = mapped_column(
+        ForeignKey("players.player_id"),
+        nullable=False,
+    )
+
+    batter_id: Mapped[int] = mapped_column(
+        ForeignKey("players.player_id"),
+        nullable=False,
+    )
+
+    pitcher_hand: Mapped[str | None] = mapped_column(
+        String(5)
+    )
+
+    batter_side: Mapped[str | None] = mapped_column(
+        String(5)
+    )
+
+    inning: Mapped[int | None] = mapped_column(Integer)
+    inning_half: Mapped[str | None] = mapped_column(String(10))
+    outs_before_pitch: Mapped[int | None] = mapped_column(Integer)
+
+    balls_before_pitch: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    strikes_before_pitch: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    previous_pitch_type: Mapped[str | None] = mapped_column(
+        String(10)
+    )
+
+    previous_pitch_zone: Mapped[str | None] = mapped_column(
+        String(30)
+    )
+
+    previous_pitch_result: Mapped[str | None] = mapped_column(
+        String(100)
+    )
+
+    second_previous_pitch_type: Mapped[str | None] = mapped_column(
+        String(10)
+    )
+
+    second_previous_pitch_zone: Mapped[str | None] = mapped_column(
+        String(30)
+    )
+
+    third_previous_pitch_type: Mapped[str | None] = mapped_column(
+        String(10)
+    )
+
+    runner_on_first: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+
+    runner_on_second: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+
+    runner_on_third: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+
+    target_pitch_type: Mapped[str] = mapped_column(
+        String(10),
+        nullable=False,
+    )
+
+    target_pitch_name: Mapped[str | None] = mapped_column(
+        String(100)
+    )
+
+    target_pitch_zone: Mapped[str | None] = mapped_column(
+        String(30)
+    )
+
+    target_plate_x: Mapped[Decimal | None] = mapped_column(
+        Numeric(9, 4)
+    )
+
+    target_plate_z: Mapped[Decimal | None] = mapped_column(
+        Numeric(9, 4)
+    )
+
+    target_release_speed: Mapped[Decimal | None] = mapped_column(
+        Numeric(7, 3)
+    )
+
+    target_description: Mapped[str | None] = mapped_column(
+        String(100)
+    )
+
+    target_is_ball: Mapped[bool | None] = mapped_column(Boolean)
+    target_is_strike: Mapped[bool | None] = mapped_column(Boolean)
+    target_is_in_play: Mapped[bool | None] = mapped_column(Boolean)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+feature_result = run_collector_step(
+    "pitch-sequence-features",
+    build_pitch_sequence_features,
+    start_date=pitch_start_date,
+    end_date=target_date,
+)
+results.append(feature_result)
 class CollectionRun(Base):
     """Tracks each collector execution."""
 
