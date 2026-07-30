@@ -9,7 +9,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -498,16 +498,18 @@ def select_games_for_collection(
             select(Game.game_pk, Game.game_date)
             .where(Game.game_date.between(start_date, end_date))
             .where(
-                Game.abstract_status.in_(
-                    ["Final", "Live"]
-                )
+                Game.abstract_status == "Final"
             )
             .order_by(Game.game_date, Game.game_pk)
         )
 
         if not force:
             statement = statement.where(
-                Game.pitches_collected.is_(False)
+                or_(
+                    Game.pitches_collected.is_(False),
+                    Game.pitch_count.is_(None),
+                    Game.pitch_count == 0,
+                )
             )
 
         if limit is not None:
@@ -525,6 +527,12 @@ def collect_one_game(
     """Collect and commit one game independently."""
     feed = fetch_game_feed(client, game_pk)
     records = parse_feed_pitches(feed, game_pk, game_date)
+
+    if not records:
+        raise RuntimeError(
+            f"Game {game_pk} returned zero pitches; "
+            "it will remain eligible for a later retry."
+        )
 
     with session_scope() as session:
         game = session.get(Game, game_pk)
