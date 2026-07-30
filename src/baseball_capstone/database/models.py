@@ -32,7 +32,20 @@ class Team(Base):
     abbreviation: Mapped[str | None] = mapped_column(String(10))
     league_name: Mapped[str | None] = mapped_column(String(50))
     division_name: Mapped[str | None] = mapped_column(String(50))
-    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+    )
+
+    current_park_id: Mapped[int | None] = mapped_column(
+        ForeignKey("parks.park_id"),
+        nullable=True,
+    )
+
+    current_park: Mapped["Park | None"] = relationship(
+        foreign_keys=[current_park_id],
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
