@@ -1,90 +1,91 @@
-import subprocess
+from __future__ import annotations
+
+import argparse
+import logging
+import os
 import sys
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
-try:
-    import scripts.scrape_game_feed as scrape_game_feed
-    import scripts.scrape_statcast as scrape_statcast
-    import scripts.scrape_transactions as scrape_transactions
-except ModuleNotFoundError as e:
-    print(f"\nCRITICAL ENTRY INITIALIZATION PATHWAYS MISSING: {e}")
-    sys.exit(1)
+from analytics.database import dispose_engine, test_database_connection
+from scripts import scrape_game_feed, scrape_statcast, scrape_transactions
 
-# PHASE ONE ANALYTICS FOUNDATION
-def run_analytics_foundation() -> None:
-    """Run optional validation only when its module exists."""
-    from importlib.util import find_spec
+logging.basicConfig(
+    level=os.getenv("ANALYTICS_LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+)
+logger = logging.getLogger("daily_pipeline")
 
-    if find_spec("analytics.run_phase_one") is None:
-        print("Analytics foundation module is not installed; skipping Phase 4.")
-        return
 
-    print("\n" + "=" * 70)
-    print("Running Phase One Analytics Foundation")
-    print("=" * 70)
+def valid_date(value: str) -> str:
+    try:
+        return date.fromisoformat(value).isoformat()
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("Date must use YYYY-MM-DD format.") from exc
 
-    result = subprocess.run(
-        [sys.executable, "-m", "analytics.run_phase_one"],
-        check=False,
-    )
-    if result.returncode != 0:
-        raise RuntimeError("Analytics foundation validation failed.")
 
-    print("Analytics foundation completed successfully.")
-
-# DAILY PIPELINE
-def run_pipeline_for_date(target_date: str) -> None:
-    print("\n=======================================================")
-    print(f"Running Normalized 7-Table Warehouse System: {target_date}")
-    print("=======================================================")
-
-    # GAME FEED INGESTION
-    print("\n--- Phase 1: Running Game Feeds ---")
+def run_pipeline_for_date(target_date: str, run_analytics: bool = True) -> int:
+    failures: list[str] = []
+    logger.info("Starting pipeline for %s", target_date)
 
     try:
-        scrape_game_feed.run(target_date)
-        print("Game feed ingestion completed.")
-    except Exception as e:
-        print(f"Core game schedule execution failed: {e}")
-        return
+        metadata = test_database_connection()
+        logger.info("Connected to database %s", metadata["database_name"])
+    except Exception:
+        logger.exception("Database preflight failed")
+        return 2
 
-    # STATCAST INGESTION
-    print("\n--- Phase 2: Running Statcast Collection ---")
+    phases = [
+        ("game feed", lambda: scrape_game_feed.run(target_date), True),
+        ("statcast", lambda: scrape_statcast.run(target_date, target_date), False),
+        ("transactions", lambda: scrape_transactions.run(target_date), False),
+    ]
 
-    try:
-        scrape_statcast.run(target_date, target_date)
-        print("Statcast ingestion completed.")
-    except Exception as e:
-        print(f"Statcast execution failed: {e}")
+    for name, action, required in phases:
+        try:
+            logger.info("Running %s phase", name)
+            action()
+            logger.info("Completed %s phase", name)
+        except Exception:
+            logger.exception("%s phase failed", name)
+            failures.append(name)
+            if required:
+                break
 
-    # TRANSACTIONS INGESTION
-    print("\n--- Phase 3: Running Transactions Collection ---")
+    if run_analytics and not failures:
+        try:
+            from analytics.run_phase_one import run_phase_one
+            run_phase_one()
+        except Exception:
+            logger.exception("Analytics validation failed")
+            failures.append("analytics")
 
-    try:
-        scrape_transactions.run(target_date)
-        print("Transaction ingestion completed.")
-    except Exception as e:
-        print(f"Transaction ingestion processing failed: {e}")
+    dispose_engine()
+    if failures:
+        logger.error("Pipeline completed with failures: %s", ", ".join(failures))
+        return 1
 
-    # ANALYTICS FOUNDATION
-    print("\n--- Phase 4: Running Analytics Foundation ---")
+    logger.info("Pipeline completed successfully for %s", target_date)
+    return 0
 
-    try:
-        run_analytics_foundation()
-    except Exception as e:
-        print(f"Analytics foundation failed: {e}")
-        return
 
-    print("\n=======================================================")
-    print(f"Pipeline completed successfully for {target_date}")
-    print("=======================================================")
+def build_parser() -> argparse.ArgumentParser:
+    yesterday = (datetime.now() - timedelta(days=1)).date().isoformat()
+    parser = argparse.ArgumentParser(description="Run the MLB warehouse daily pipeline.")
+    parser.add_argument("date", nargs="?", default=yesterday, type=valid_date)
+    parser.add_argument("--skip-analytics", action="store_true")
+    parser.add_argument("--check-only", action="store_true")
+    return parser
 
-# ENTRY POINT
+
+def main() -> int:
+    args = build_parser().parse_args()
+    if args.check_only:
+        print(test_database_connection())
+        dispose_engine()
+        return 0
+    env_enabled = os.getenv("PIPELINE_RUN_ANALYTICS", "true").lower() in {"1", "true", "yes"}
+    return run_pipeline_for_date(args.date, run_analytics=env_enabled and not args.skip_analytics)
+
+
 if __name__ == "__main__":
-    yesterday = (
-        datetime.now() - timedelta(days=1)
-    ).strftime("%Y-%m-%d")
-
-    date_arg = sys.argv[1] if len(sys.argv) > 1 else yesterday
-
-    run_pipeline_for_date(date_arg)
+    sys.exit(main())

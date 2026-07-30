@@ -6,6 +6,11 @@ import pandas as pd
 
 from analytics.game_plan_repository import GamePlanRepository, HistoryFilters
 from analytics.ml_pitch_model import train_pitch_model, count_tendencies
+from analytics.pitch_outcome_model import train_outcome_model, scenario_scores
+from analytics.contextual_analysis import (
+    recent_games, home_away_splits, game_state_splits, pitcher_self_comparison,
+    bullpen_summary,
+)
 from analytics.opponent_pitcher_scout import build_opponent_pitcher_scout
 from analytics.scouting_visuals import (
     build_decision_tree, executive_summary, movement_and_release_summary,
@@ -62,13 +67,19 @@ class GamePlanService:
                     "Correct the IDs or run with --skip-roster-validation for historical/transaction edge cases."
                 )
         filters = HistoryFilters(season=season, start_date=start_date, end_date=end_date)
+        print(f"  Loading pitcher history for {pitcher_id}...", flush=True)
         pitcher_history = self.repository.get_pitcher_history(pitcher_id, filters)
+        print(f"  Loaded {len(pitcher_history):,} pitcher pitches.", flush=True)
         if pitcher_history.empty:
             raise RuntimeError(f"No pitch history was found for pitcher_id={pitcher_id}.")
 
         batter_ids = lineup["player_id"].dropna().astype(int).tolist()
+        print(f"  Loading history for {len(batter_ids)} hitters...", flush=True)
         batter_history = self.repository.get_batter_histories(batter_ids, filters)
+        print(f"  Loaded {len(batter_history):,} batter pitches.", flush=True)
+        print("  Loading direct matchup history...", flush=True)
         direct_history = self.repository.get_direct_matchups(pitcher_id, batter_ids, filters)
+        print(f"  Loaded {len(direct_history):,} direct matchup pitches.", flush=True)
         arsenal = summarize_pitcher_arsenal(pitcher_history)
         arsenal_lookup = {str(p.get("pitch_type")): p for p in arsenal}
         pitcher_allowed = summarize_batter(pitcher_history)
@@ -77,6 +88,7 @@ class GamePlanService:
 
         rows=[]
         for lineup_row in lineup.to_dict("records"):
+            print(f"  Analyzing {lineup_row.get('batter_name') or lineup_row.get('player_id')}...", flush=True)
             batter_id=int(lineup_row["player_id"])
             bp=batter_history.loc[batter_history["batter_id"] == batter_id].copy()
             dp=direct_history.loc[direct_history["batter_id"] == batter_id].copy()
@@ -120,6 +132,8 @@ class GamePlanService:
                     bp, f"Vs {self._pitch_name(primary.pitch_type)}", primary.pitch_type
                 ) if primary else "",
                 "sample_warning": self._sample_warning(summary, direct),
+                "recent_form": recent_games(bp, 5),
+                "game_state_splits": game_state_splits(bp),
             })
 
         opponent_name = ""
@@ -140,6 +154,45 @@ class GamePlanService:
             "note": ml_result.note if ml_result else "Machine learning was not requested.",
             "count_tendencies": count_tendencies(ml_result, "R") if ml_result and ml_result.available else [],
         }
+        # Expanded context: recent form, self-comparison, location, game state, peer ranks, bullpen, and outcome ML.
+        contextual = {
+            "recent_form": recent_games(pitcher_history, 5),
+            "self_comparison": pitcher_self_comparison(pitcher_history, 5),
+            "home_away": home_away_splits(pitcher_history, pitcher_team_id),
+            "game_state": game_state_splits(pitcher_history),
+            "location_label": (
+                "Home" if pitcher_team_id is not None and context.get("home_team_id") == pitcher_team_id
+                else "Away" if pitcher_team_id is not None and context.get("away_team_id") == pitcher_team_id
+                else "Not specified"
+            ),
+        }
+        peer_comparison = {
+            "similar": [],
+            "rankings": [],
+            "note": "Similar-player and league-wide peer analysis are disabled. The report uses the selected players' own historical performance.",
+        }
+        try:
+            bullpen_frame = self.repository.get_team_bullpen_history(int(pitcher_team_id), filters) if pitcher_team_id else pd.DataFrame()
+            # Remove the selected starter from the relief candidate list.
+            if not bullpen_frame.empty:
+                bullpen_frame = bullpen_frame[bullpen_frame["pitcher_id"].ne(int(pitcher_id))]
+            bullpen = bullpen_summary(bullpen_frame)
+        except Exception as exc:
+            bullpen = []
+        outcome_result = train_outcome_model(pitcher_history) if use_ml else None
+        outcome_summary = {
+            "enabled": bool(use_ml),
+            "available": bool(outcome_result and outcome_result.available),
+            "sample_size": outcome_result.sample_size if outcome_result else 0,
+            "accuracy": outcome_result.accuracy if outcome_result else None,
+            "log_loss": outcome_result.log_loss if outcome_result else None,
+            "note": outcome_result.note if outcome_result else "Pitch-outcome ML was not requested.",
+            "candidate_scores": scenario_scores(
+                outcome_result, [str(x.get("pitch_type")) for x in arsenal],
+                str(lineup.iloc[0].get("bats") or "R") if not lineup.empty else "R",
+            ) if outcome_result and outcome_result.available else [],
+        }
+
         opposing_scout = None
         if opposing_pitcher_id is not None:
             opposing_meta = self.repository.get_pitcher_metadata(opposing_pitcher_id)
@@ -160,6 +213,10 @@ class GamePlanService:
             "pitcher_tracking": pitcher_tracking,
             "pitch_tunneling": tunnel_rankings,
             "opposing_pitcher_scout": opposing_scout, "machine_learning": ml_summary,
+            "pitch_outcome_model": outcome_summary,
+            "contextual_analysis": contextual,
+            "peer_comparison": peer_comparison,
+            "bullpen": bullpen,
             "methodology_note":"Historical matchup estimates and rule-based pitch recommendations for decision support; not guaranteed outcomes.",
         }
 

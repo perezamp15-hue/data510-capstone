@@ -3,11 +3,22 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, Sequence
+import re
+import unicodedata
 
 import pandas as pd
 from sqlalchemy import bindparam, text
 
 from db_client import get_engine
+
+
+def normalize_player_name(value: str | None) -> str:
+    """Normalize names for accent-insensitive, punctuation-insensitive matching."""
+    if value is None:
+        return ""
+    text = unicodedata.normalize("NFKD", str(value))
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    return re.sub(r"[^a-z0-9]", "", text.casefold())
 
 
 @dataclass(frozen=True)
@@ -286,14 +297,6 @@ class GamePlanRepository:
                 )
             return row
 
-        def normalized(value: str) -> str:
-            decomposed = unicodedata.normalize("NFKD", value)
-            return " ".join(
-                "".join(ch for ch in decomposed if not unicodedata.combining(ch))
-                .casefold()
-                .split()
-            )
-
         surname = cleaned.split()[-1]
 
         # Build the ordering clause separately. Passing ``None`` into a CASE
@@ -353,9 +356,9 @@ class GamePlanRepository:
         if not rows:
             raise ValueError(f"No player was found matching {player_name!r}.")
 
-        target = normalized(cleaned)
-        exact = [row for row in rows if normalized(str(row["full_name"])) == target]
-        contains = [row for row in rows if target in normalized(str(row["full_name"]))]
+        target = normalize_player_name(cleaned)
+        exact = [row for row in rows if normalize_player_name(str(row["full_name"])) == target]
+        contains = [row for row in rows if target in normalize_player_name(str(row["full_name"]))]
         candidates = exact or contains or rows
 
         if team_id is not None:
@@ -467,9 +470,11 @@ class GamePlanRepository:
         SELECT
         {PITCH_COLUMNS},
             batter.bats AS batter_side,
-            batter.full_name AS batter_name
+            batter.full_name AS batter_name,
+            game.home_team_id, game.away_team_id
         FROM public.statcast_pitches AS sp
         LEFT JOIN public.players AS batter ON batter.player_id = sp.batter_id
+        LEFT JOIN public.games AS game ON game.game_pk = sp.game_pk
         WHERE sp.pitcher_id = :pitcher_id
           AND sp.pitch_type IS NOT NULL
         """
@@ -494,10 +499,12 @@ class GamePlanRepository:
         {PITCH_COLUMNS},
             pitcher.throws AS pitcher_throws,
             batter.bats AS batter_side,
-            batter.full_name AS batter_name
+            batter.full_name AS batter_name,
+            game.home_team_id, game.away_team_id
         FROM public.statcast_pitches AS sp
         LEFT JOIN public.players AS pitcher ON pitcher.player_id = sp.pitcher_id
         LEFT JOIN public.players AS batter ON batter.player_id = sp.batter_id
+        LEFT JOIN public.games AS game ON game.game_pk = sp.game_pk
         WHERE sp.batter_id IN :batter_ids
         """
         params: dict[str, Any] = {"batter_ids": cleaned_ids}
@@ -523,10 +530,12 @@ class GamePlanRepository:
         {PITCH_COLUMNS},
             pitcher.throws AS pitcher_throws,
             batter.bats AS batter_side,
-            batter.full_name AS batter_name
+            batter.full_name AS batter_name,
+            game.home_team_id, game.away_team_id
         FROM public.statcast_pitches AS sp
         LEFT JOIN public.players AS pitcher ON pitcher.player_id = sp.pitcher_id
         LEFT JOIN public.players AS batter ON batter.player_id = sp.batter_id
+        LEFT JOIN public.games AS game ON game.game_pk = sp.game_pk
         WHERE sp.pitcher_id = :pitcher_id
           AND sp.batter_id IN :batter_ids
         """
@@ -541,3 +550,45 @@ class GamePlanRepository:
         statement = text(query).bindparams(bindparam("batter_ids", expanding=True))
         with get_engine().connect() as connection:
             return pd.read_sql(statement, connection, params=params)
+
+    def get_league_pitcher_history(self, filters: HistoryFilters, minimum_pitches: int = 150) -> pd.DataFrame:
+        query = f"""
+        SELECT {PITCH_COLUMNS}, pitcher.full_name AS pitcher_name, pitcher.throws,
+               batter.bats AS batter_side, game.home_team_id, game.away_team_id
+        FROM public.statcast_pitches AS sp
+        LEFT JOIN public.players AS pitcher ON pitcher.player_id = sp.pitcher_id
+        LEFT JOIN public.players AS batter ON batter.player_id = sp.batter_id
+        LEFT JOIN public.games AS game ON game.game_pk = sp.game_pk
+        WHERE sp.pitch_type IS NOT NULL
+        """
+        params: dict[str, Any] = {}
+        query, params = self._append_history_filters(query, params, filters)
+        query += " ORDER BY sp.pitcher_id, sp.game_date, sp.game_pk, sp.at_bat_number, sp.pitch_number"
+        with get_engine().connect() as connection:
+            frame = pd.read_sql(text(query), connection, params=params)
+        if frame.empty:
+            return frame
+        counts = frame.groupby("pitcher_id").size()
+        return frame[frame["pitcher_id"].isin(counts[counts >= minimum_pitches].index)].copy()
+
+    def get_team_bullpen_history(self, team_id: int, filters: HistoryFilters, days: int = 21) -> pd.DataFrame:
+        query = f"""
+        SELECT {PITCH_COLUMNS}, pitcher.full_name AS pitcher_name, pitcher.throws,
+               batter.bats AS batter_side, game.home_team_id, game.away_team_id
+        FROM public.statcast_pitches AS sp
+        JOIN public.players AS pitcher ON pitcher.player_id = sp.pitcher_id
+        LEFT JOIN public.players AS batter ON batter.player_id = sp.batter_id
+        LEFT JOIN public.games AS game ON game.game_pk = sp.game_pk
+        WHERE pitcher.current_team_id = :team_id AND sp.pitch_type IS NOT NULL
+        """
+        params: dict[str, Any] = {"team_id": int(team_id)}
+        query, params = self._append_history_filters(query, params, filters)
+        query += " ORDER BY sp.game_date DESC, sp.game_pk DESC, sp.pitch_number"
+        with get_engine().connect() as connection:
+            frame = pd.read_sql(text(query), connection, params=params)
+        if frame.empty or "game_date" not in frame:
+            return frame
+        dates = pd.to_datetime(frame["game_date"], errors="coerce")
+        cutoff = dates.max() - pd.Timedelta(days=days)
+        return frame[dates.ge(cutoff)].copy()
+

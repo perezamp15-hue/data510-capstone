@@ -50,7 +50,7 @@ YAMAMOTO_VS_SKUBAL_PRESET: dict[str, Any] = {
         "Dillon Dingler",
         "Javier Báez",
     ],
-    "season": 2026,
+    "season": None,
     "output": "output/dodgers_vs_tigers_yamamoto_skubal.html",
 }
 
@@ -80,7 +80,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  python3 run_matchup_plan.py --our-team \"Philadelphia Phillies\" "
             "--our-pitcher \"Zack Wheeler\" --our-lineup \"PLAYER1,...,PLAYER9\" "
             "--opponent-team \"Atlanta Braves\" --opposing-pitcher \"Spencer Strider\" "
-            "--opponent-lineup \"PLAYER1,...,PLAYER9\" --season 2026"
+            "--opponent-lineup \"PLAYER1,...,PLAYER9\""
         ),
     )
     parser.add_argument(
@@ -116,8 +116,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--use-ml",
         action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Use the existing pitch-tendency classifier; no new ML is added.",
+        default=False,
+        help="Enable pitch-tendency and pitch-outcome machine-learning models.",
     )
     parser.add_argument("--skip-roster-validation", action="store_true")
     parser.add_argument("--output", type=Path)
@@ -208,7 +208,7 @@ def resolve_arguments(args: argparse.Namespace) -> dict[str, Any]:
         opponent_team_name = cfg["opponent_team"]
         opposing_pitcher_name = cfg["opposing_pitcher"]
         opponent_lineup_values = list(cfg["opponent_lineup"])
-        season = args.season or int(cfg["season"])
+        season = args.season if args.season is not None else cfg.get("season")
         output = args.output or Path(str(cfg["output"]))
     else:
         our_team_name = args.our_team
