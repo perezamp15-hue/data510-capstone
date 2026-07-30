@@ -160,35 +160,74 @@ class Park(Base):
 
 
 class Game(Base):
-    """One MLB game."""
+    """One MLB game and its current schedule state."""
 
     __tablename__ = "games"
     __table_args__ = (
         Index("ix_games_game_date", "game_date"),
         Index("ix_games_season", "season"),
+        Index("ix_games_status", "status"),
+        Index("ix_games_home_team_id", "home_team_id"),
+        Index("ix_games_away_team_id", "away_team_id"),
     )
 
-    game_pk: Mapped[int] = mapped_column(Integer, primary_key=True)
-    game_date: Mapped[date] = mapped_column(Date, nullable=False)
-    season: Mapped[int] = mapped_column(Integer, nullable=False)
+    game_pk: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+    )
+
+    game_date: Mapped[date] = mapped_column(
+        Date,
+        nullable=False,
+    )
+
+    scheduled_start: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+    )
+
+    season: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
     game_type: Mapped[str | None] = mapped_column(String(10))
     status: Mapped[str | None] = mapped_column(String(50))
+    detailed_status: Mapped[str | None] = mapped_column(String(100))
+    abstract_status: Mapped[str | None] = mapped_column(String(50))
+
+    doubleheader: Mapped[str | None] = mapped_column(String(20))
+    game_number: Mapped[int | None] = mapped_column(Integer)
 
     home_team_id: Mapped[int] = mapped_column(
         ForeignKey("teams.team_id"),
         nullable=False,
     )
+
     away_team_id: Mapped[int] = mapped_column(
         ForeignKey("teams.team_id"),
         nullable=False,
     )
+
     park_id: Mapped[int | None] = mapped_column(
         ForeignKey("parks.park_id"),
         nullable=True,
     )
 
+    home_probable_pitcher_id: Mapped[int | None] = mapped_column(
+        ForeignKey("players.player_id"),
+        nullable=True,
+    )
+
+    away_probable_pitcher_id: Mapped[int | None] = mapped_column(
+        ForeignKey("players.player_id"),
+        nullable=True,
+    )
+
     home_score: Mapped[int | None] = mapped_column(Integer)
     away_score: Mapped[int | None] = mapped_column(Integer)
+
+    inning: Mapped[int | None] = mapped_column(Integer)
+    inning_half: Mapped[str | None] = mapped_column(String(20))
 
     day_night: Mapped[str | None] = mapped_column(String(10))
     temperature_f: Mapped[int | None] = mapped_column(Integer)
@@ -199,16 +238,29 @@ class Game(Base):
     home_team: Mapped[Team] = relationship(
         foreign_keys=[home_team_id],
     )
+
     away_team: Mapped[Team] = relationship(
         foreign_keys=[away_team_id],
     )
-    park: Mapped[Park | None] = relationship()
+
+    park: Mapped[Park | None] = relationship(
+        foreign_keys=[park_id],
+    )
+
+    home_probable_pitcher: Mapped[Player | None] = relationship(
+        foreign_keys=[home_probable_pitcher_id],
+    )
+
+    away_probable_pitcher: Mapped[Player | None] = relationship(
+        foreign_keys=[away_probable_pitcher_id],
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
     )
+
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
