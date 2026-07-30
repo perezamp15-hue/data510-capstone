@@ -268,9 +268,29 @@ class Game(Base):
         onupdate=func.now(),
     )
 
+    pitches_collected: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+    )
+
+    pitch_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+
+    pitches_collected_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+
+    pitch_collection_error: Mapped[str | None] = mapped_column(Text)
+
 
 class Pitch(Base):
-    """Pitch-level Statcast observation."""
+    """One pitch from an MLB game live feed."""
 
     __tablename__ = "pitches"
     __table_args__ = (
@@ -280,9 +300,10 @@ class Pitch(Base):
             "pitch_number",
             name="uq_pitches_game_at_bat_pitch",
         ),
+        Index("ix_pitches_game_pk", "game_pk"),
+        Index("ix_pitches_game_date", "game_date"),
         Index("ix_pitches_pitcher_id", "pitcher_id"),
         Index("ix_pitches_batter_id", "batter_id"),
-        Index("ix_pitches_game_date", "game_date"),
         Index("ix_pitches_pitch_type", "pitch_type"),
     )
 
@@ -296,10 +317,23 @@ class Pitch(Base):
         ForeignKey("games.game_pk", ondelete="CASCADE"),
         nullable=False,
     )
+
     game_date: Mapped[date] = mapped_column(Date, nullable=False)
 
-    at_bat_number: Mapped[int] = mapped_column(Integer, nullable=False)
-    pitch_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    at_bat_number: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    plate_appearance_number: Mapped[int | None] = mapped_column(
+        Integer
+    )
+
+    pitch_number: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
     inning: Mapped[int | None] = mapped_column(Integer)
     inning_half: Mapped[str | None] = mapped_column(String(10))
     outs: Mapped[int | None] = mapped_column(Integer)
@@ -311,55 +345,117 @@ class Pitch(Base):
         ForeignKey("players.player_id"),
         nullable=False,
     )
+
     batter_id: Mapped[int] = mapped_column(
         ForeignKey("players.player_id"),
         nullable=False,
     )
 
     pitch_type: Mapped[str | None] = mapped_column(String(10))
-    pitch_name: Mapped[str | None] = mapped_column(String(50))
+    pitch_name: Mapped[str | None] = mapped_column(String(100))
     description: Mapped[str | None] = mapped_column(String(100))
     event: Mapped[str | None] = mapped_column(String(100))
+    event_type: Mapped[str | None] = mapped_column(String(100))
 
-    release_speed: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
-    effective_speed: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
+    is_pitch: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+    )
+
+    is_ball: Mapped[bool | None] = mapped_column(Boolean)
+    is_strike: Mapped[bool | None] = mapped_column(Boolean)
+    is_in_play: Mapped[bool | None] = mapped_column(Boolean)
+
+    release_speed: Mapped[Decimal | None] = mapped_column(
+        Numeric(7, 3)
+    )
+    effective_speed: Mapped[Decimal | None] = mapped_column(
+        Numeric(7, 3)
+    )
     release_spin_rate: Mapped[int | None] = mapped_column(Integer)
-    release_extension: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
+    release_extension: Mapped[Decimal | None] = mapped_column(
+        Numeric(7, 3)
+    )
 
-    release_pos_x: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
-    release_pos_y: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
-    release_pos_z: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    release_pos_x: Mapped[Decimal | None] = mapped_column(
+        Numeric(9, 4)
+    )
+    release_pos_y: Mapped[Decimal | None] = mapped_column(
+        Numeric(9, 4)
+    )
+    release_pos_z: Mapped[Decimal | None] = mapped_column(
+        Numeric(9, 4)
+    )
 
-    plate_x: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
-    plate_z: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
-    strike_zone_top: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
-    strike_zone_bottom: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    plate_x: Mapped[Decimal | None] = mapped_column(Numeric(9, 4))
+    plate_z: Mapped[Decimal | None] = mapped_column(Numeric(9, 4))
 
-    pfx_x: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
-    pfx_z: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    strike_zone_top: Mapped[Decimal | None] = mapped_column(
+        Numeric(9, 4)
+    )
+    strike_zone_bottom: Mapped[Decimal | None] = mapped_column(
+        Numeric(9, 4)
+    )
 
-    launch_speed: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
-    launch_angle: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
-    hit_distance: Mapped[Decimal | None] = mapped_column(Numeric(7, 2))
+    pfx_x: Mapped[Decimal | None] = mapped_column(Numeric(9, 4))
+    pfx_z: Mapped[Decimal | None] = mapped_column(Numeric(9, 4))
+
+    launch_speed: Mapped[Decimal | None] = mapped_column(
+        Numeric(7, 3)
+    )
+    launch_angle: Mapped[Decimal | None] = mapped_column(
+        Numeric(7, 3)
+    )
+    hit_distance: Mapped[Decimal | None] = mapped_column(
+        Numeric(8, 3)
+    )
+
+    hit_location: Mapped[int | None] = mapped_column(Integer)
+    trajectory: Mapped[str | None] = mapped_column(String(50))
+    hardness: Mapped[str | None] = mapped_column(String(50))
 
     estimated_batting_average: Mapped[Decimal | None] = mapped_column(
-        Numeric(6, 5)
+        Numeric(8, 6)
     )
-    estimated_woba: Mapped[Decimal | None] = mapped_column(Numeric(6, 5))
-    estimated_slugging: Mapped[Decimal | None] = mapped_column(Numeric(6, 5))
+    estimated_woba: Mapped[Decimal | None] = mapped_column(
+        Numeric(8, 6)
+    )
+    estimated_slugging: Mapped[Decimal | None] = mapped_column(
+        Numeric(8, 6)
+    )
 
     zone: Mapped[int | None] = mapped_column(Integer)
     type_code: Mapped[str | None] = mapped_column(String(5))
 
-    runner_on_first: Mapped[bool] = mapped_column(Boolean, default=False)
-    runner_on_second: Mapped[bool] = mapped_column(Boolean, default=False)
-    runner_on_third: Mapped[bool] = mapped_column(Boolean, default=False)
+    runner_on_first: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    runner_on_second: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    runner_on_third: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+
+    home_score: Mapped[int | None] = mapped_column(Integer)
+    away_score: Mapped[int | None] = mapped_column(Integer)
 
     raw_payload: Mapped[str | None] = mapped_column(Text)
 
     game: Mapped[Game] = relationship()
-    pitcher: Mapped[Player] = relationship(foreign_keys=[pitcher_id])
-    batter: Mapped[Player] = relationship(foreign_keys=[batter_id])
+    pitcher: Mapped[Player] = relationship(
+        foreign_keys=[pitcher_id]
+    )
+    batter: Mapped[Player] = relationship(
+        foreign_keys=[batter_id]
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -367,6 +463,12 @@ class Pitch(Base):
         server_default=func.now(),
     )
 
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
 
 class CollectionRun(Base):
     """Tracks each collector execution."""
