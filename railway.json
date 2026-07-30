@@ -5,10 +5,7 @@
   },
   "deploy": {
     "preDeployCommand": "alembic upgrade head",
-<<<<<<< HEAD
-=======
     "startCommand": "python scripts/run_daily_pipeline.py --skip-players --pitch-limit 5",
->>>>>>> da42856 (Add Railway daily pipeline start command)
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 2
   }
