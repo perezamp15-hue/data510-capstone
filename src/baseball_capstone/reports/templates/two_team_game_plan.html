@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>{{ report_title }}</title>
+
+    <style>
+        :root {
+            --background: #f2f5f8;
+            --surface: #ffffff;
+            --surface-soft: #f7f9fc;
+            --text: #172033;
+            --muted: #66758a;
+            --border: #dce3eb;
+            --accent: #173b67;
+            --accent-soft: #e7eff8;
+            --success: #18794e;
+            --warning: #a15c00;
+            --danger: #b42318;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            color: var(--text);
+            background: var(--background);
+            font-family:
+                -apple-system,
+                BlinkMacSystemFont,
+                "Segoe UI",
+                sans-serif;
+            line-height: 1.5;
+        }
+
+        .page {
+            width: min(1500px, calc(100% - 32px));
+            margin: 24px auto 48px;
+        }
+
+        .hero {
+            padding: 32px;
+            color: white;
+            border-radius: 18px;
+            background:
+                linear-gradient(
+                    135deg,
+                    #102a4a,
+                    #285b8f
+                );
+        }
+
+        .hero h1 {
+            margin: 0 0 8px;
+            font-size: clamp(30px, 4vw, 46px);
+        }
+
+        .hero p {
+            margin: 4px 0;
+            color: rgba(255, 255, 255, 0.82);
+        }
+
+        .matchup-grid {
+            display: grid;
+            grid-template-columns:
+                repeat(auto-fit, minmax(240px, 1fr));
+            gap: 16px;
+            margin-top: 24px;
+        }
+
+        .hero-card {
+            padding: 18px;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+        }
+
+        .label {
+            display: block;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.07em;
+            color: inherit;
+            opacity: 0.72;
+        }
+
+        .value {
+            display: block;
+            margin-top: 4px;
+            font-size: 20px;
+            font-weight: 700;
+        }
+
+        .section {
+            margin-top: 26px;
+        }
+
+        .section-heading {
+            margin-bottom: 14px;
+        }
+
+        .section-heading h2 {
+            margin: 0;
+            font-size: 27px;
+        }
+
+        .section-heading p {
+            margin: 4px 0 0;
+            color: var(--muted);
+        }
+
+        .card {
+            padding: 20px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            box-shadow: 0 4px 14px rgba(25, 42, 66, 0.05);
+        }
+
+        .team-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 18px;
+            flex-wrap: wrap;
+        }
+
+        .team-header h2 {
+            margin: 0;
+        }
+
+        .team-meta {
+            color: var(--muted);
+        }
+
+        .lineup-table {
+            width: 100%;
+            margin-top: 16px;
+            border-collapse: collapse;
+        }
+
+        th,
+        td {
+            padding: 10px 8px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+
+        th {
+            color: var(--muted);
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .threat-high {
+            color: var(--danger);
+            font-weight: 700;
+        }
+
+        .threat-medium {
+            color: var(--warning);
+            font-weight: 700;
+        }
+
+        .threat-low {
+            color: var(--success);
+            font-weight: 700;
+        }
+
+        .batter-card {
+            margin-top: 18px;
+        }
+
+        .batter-title {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        .batter-title h3 {
+            margin: 0;
+            font-size: 21px;
+        }
+
+        .pill {
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 999px;
+            background: var(--accent-soft);
+            color: var(--accent);
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .batter-grid {
+            display: grid;
+            grid-template-columns:
+                repeat(auto-fit, minmax(300px, 1fr));
+            gap: 16px;
+            margin-top: 16px;
+        }
+
+        .subcard {
+            padding: 16px;
+            background: var(--surface-soft);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+        }
+
+        .subcard h4 {
+            margin: 0 0 12px;
+        }
+
+        .probability-row {
+            margin: 12px 0;
+        }
+
+        .probability-header {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 5px;
+        }
+
+        .track {
+            height: 11px;
+            background: #e3e9f0;
+            border-radius: 999px;
+            overflow: hidden;
+        }
+
+        .fill {
+            height: 100%;
+            background:
+                linear-gradient(
+                    90deg,
+                    #1e4b77,
+                    #5593c9
+                );
+        }
+
+        .sequence-step {
+            display: grid;
+            grid-template-columns: 34px 1fr;
+            gap: 10px;
+            margin: 12px 0;
+        }
+
+        .step-number {
+            display: grid;
+            place-items: center;
+            width: 30px;
+            height: 30px;
+            color: white;
+            border-radius: 50%;
+            background: var(--accent);
+            font-weight: 700;
+        }
+
+        .metrics {
+            display: grid;
+            grid-template-columns:
+                repeat(auto-fit, minmax(120px, 1fr));
+            gap: 10px;
+            margin-top: 14px;
+        }
+
+        .metric {
+            padding: 12px;
+            border-radius: 10px;
+            background: white;
+            border: 1px solid var(--border);
+        }
+
+        .metric-name {
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .metric-value {
+            display: block;
+            margin-top: 4px;
+            font-size: 18px;
+            font-weight: 700;
+        }
+
+        .summary-list {
+            margin: 0;
+            padding-left: 20px;
+        }
+
+        .summary-list li {
+            margin-bottom: 8px;
+        }
+
+        footer {
+            margin-top: 28px;
+            text-align: center;
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        @media print {
+            body {
+                background: white;
+            }
+
+            .page {
+                width: 100%;
+                margin: 0;
+            }
+
+            .card,
+            .hero {
+                box-shadow: none;
+            }
+
+            .batter-card {
+                break-inside: avoid;
+            }
+        }
+    </style>
+</head>
+
+<body>
+<main class="page">
+
+<header class="hero">
+    <h1>{{ report_title }}</h1>
+
+    <p>
+        {{ away_team.name }} at {{ home_team.name }}
+    </p>
+
+    <p>
+        Generated {{ generated_at }}
+        · Model {{ model_version }}
+    </p>
+
+    <div class="matchup-grid">
+        <div class="hero-card">
+            <span class="label">Away starting pitcher</span>
+            <span class="value">
+                {{ away_team.pitcher.name }}
+            </span>
+        </div>
+
+        <div class="hero-card">
+            <span class="label">Home starting pitcher</span>
+            <span class="value">
+                {{ home_team.pitcher.name }}
+            </span>
+        </div>
+
+        <div class="hero-card">
+            <span class="label">Venue</span>
+            <span class="value">
+                {{ venue or "Not supplied" }}
+            </span>
+        </div>
+
+        <div class="hero-card">
+            <span class="label">Data period</span>
+            <span class="value">
+                {{ data_period }}
+            </span>
+        </div>
+    </div>
+</header>
+
+{% for plan in team_plans %}
+<section class="section">
+
+    <article class="card">
+        <div class="team-header">
+            <div>
+                <h2>{{ plan.offense_team }} Offensive Plan</h2>
+
+                <div class="team-meta">
+                    Facing {{ plan.opposing_pitcher.name }}
+                    · Throws {{ plan.opposing_pitcher.throws }}
+                </div>
+            </div>
+
+            <span class="pill">
+                {{ plan.lineup|length }} batters analyzed
+            </span>
+        </div>
+
+        <table class="lineup-table">
+            <thead>
+            <tr>
+                <th>Order</th>
+                <th>Batter</th>
+                <th>Side</th>
+                <th>Threat</th>
+                <th>Likely first pitch</th>
+                <th>Recommended attack</th>
+                <th>Confidence</th>
+            </tr>
+            </thead>
+
+            <tbody>
+            {% for batter in plan.lineup %}
+            <tr>
+                <td>{{ batter.order }}</td>
+                <td>{{ batter.name }}</td>
+                <td>{{ batter.bats }}</td>
+
+                <td class="threat-{{ batter.threat_level|lower }}">
+                    {{ batter.threat_level }}
+                </td>
+
+                <td>
+                    {{ batter.predicted_pitches[0].pitch_name }}
+                </td>
+
+                <td>
+                    {{ batter.recommended_sequence.pitches[0].pitch_name }}
+                    →
+                    {{ batter.recommended_sequence.pitches[1].pitch_name }}
+                    →
+                    {{ batter.recommended_sequence.pitches[2].pitch_name }}
+                </td>
+
+                <td>
+                    {{ "%.1f"|format(
+                        batter.confidence * 100
+                    ) }}%
+                </td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </article>
+
+    {% for batter in plan.lineup %}
+    <article class="card batter-card">
+
+        <div class="batter-title">
+            <div>
+                <h3>
+                    {{ batter.order }}. {{ batter.name }}
+                </h3>
+
+                <div class="team-meta">
+                    {{ batter.bats }}HB
+                    · Batter ID {{ batter.player_id }}
+                </div>
+            </div>
+
+            <span class="pill">
+                {{ batter.threat_level }} threat
+            </span>
+        </div>
+
+        <div class="batter-grid">
+
+            <div class="subcard">
+                <h4>Expected opposing pattern</h4>
+
+                {% for pitch in batter.predicted_pitches %}
+                <div class="probability-row">
+                    <div class="probability-header">
+                        <strong>
+                            {{ pitch.pitch_name }}
+                        </strong>
+
+                        <span>
+                            {{ "%.1f"|format(
+                                pitch.probability * 100
+                            ) }}%
+                        </span>
+                    </div>
+
+                    <div class="track">
+                        <div
+                            class="fill"
+                            style="
+                                width:
+                                {{ pitch.probability * 100 }}%;
+                            "
+                        ></div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+
+            <div class="subcard">
+                <h4>Recommended attack pattern</h4>
+
+                {% for pitch in batter.recommended_sequence.pitches %}
+                <div class="sequence-step">
+                    <div class="step-number">
+                        {{ loop.index }}
+                    </div>
+
+                    <div>
+                        <strong>{{ pitch.pitch_name }}</strong>
+
+                        <div>
+                            {{ pitch.zone }}
+                        </div>
+
+                        <div class="team-meta">
+                            {{ pitch.reason }}
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+
+                <div class="metrics">
+                    <div class="metric">
+                        <span class="metric-name">
+                            Sequence score
+                        </span>
+
+                        <span class="metric-value">
+                            {{ "%.1f"|format(
+                                batter.recommended_sequence.score
+                            ) }}
+                        </span>
+                    </div>
+
+                    <div class="metric">
+                        <span class="metric-name">
+                            Expected wOBA
+                        </span>
+
+                        <span class="metric-value">
+                            {{ "%.3f"|format(
+                                batter.recommended_sequence.expected_woba
+                            ) }}
+                        </span>
+                    </div>
+
+                    <div class="metric">
+                        <span class="metric-name">
+                            Whiff probability
+                        </span>
+
+                        <span class="metric-value">
+                            {{ "%.1f"|format(
+                                batter.recommended_sequence.whiff_probability
+                                * 100
+                            ) }}%
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="subcard">
+                <h4>Situational adjustments</h4>
+
+                <ul class="summary-list">
+                    {% for adjustment in batter.adjustments %}
+                    <li>{{ adjustment }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+
+            <div class="subcard">
+                <h4>Strategy explanation</h4>
+
+                <p>
+                    {{ batter.strategy_summary }}
+                </p>
+
+                <div class="metrics">
+                    <div class="metric">
+                        <span class="metric-name">
+                            Historical sample
+                        </span>
+
+                        <span class="metric-value">
+                            {{ batter.historical_sample }}
+                        </span>
+                    </div>
+
+                    <div class="metric">
+                        <span class="metric-name">
+                            Confidence
+                        </span>
+
+                        <span class="metric-value">
+                            {{ "%.1f"|format(
+                                batter.confidence * 100
+                            ) }}%
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </article>
+    {% endfor %}
+
+</section>
+{% endfor %}
+
+<section class="section">
+    <div class="section-heading">
+        <h2>Game-plan summary</h2>
+        <p>
+            Highest-priority recommendations for both teams.
+        </p>
+    </div>
+
+    <div class="batter-grid">
+        {% for plan in team_plans %}
+        <article class="card">
+            <h3>{{ plan.offense_team }}</h3>
+
+            <ul class="summary-list">
+                {% for item in plan.team_summary %}
+                <li>{{ item }}</li>
+                {% endfor %}
+            </ul>
+        </article>
+        {% endfor %}
+    </div>
+</section>
+
+<section class="section">
+    <article class="card">
+        <h2>Methodology and limitations</h2>
+
+        <ul class="summary-list">
+            {% for item in methodology %}
+            <li>{{ item }}</li>
+            {% endfor %}
+        </ul>
+    </article>
+</section>
+
+<footer>
+    MLB two-team pitch strategy report · {{ generated_at }}
+</footer>
+
+</main>
+</body>
+</html>
