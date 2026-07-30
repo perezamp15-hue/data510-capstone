@@ -4,7 +4,16 @@ from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool
+from pathlib import Path
+import sys
 
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SOURCE_DIRECTORY = PROJECT_ROOT / "src"
+
+if str(SOURCE_DIRECTORY) not in sys.path:
+    sys.path.insert(0, str(SOURCE_DIRECTORY))
+    
 from baseball_capstone.config.settings import get_settings
 from baseball_capstone.database.base import Base
 from baseball_capstone.database import models  # noqa: F401
