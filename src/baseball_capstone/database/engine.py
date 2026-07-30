@@ -1,6 +1,7 @@
-"""PostgreSQL engine and connection helpers."""
+"""PostgreSQL engine and session helpers."""
 
 from collections.abc import Iterator
+from contextlib import contextmanager
 from functools import lru_cache
 
 from sqlalchemy import Engine, create_engine, text
@@ -10,12 +11,7 @@ from baseball_capstone.config.settings import get_settings
 
 
 def normalize_database_url(database_url: str) -> str:
-    """
-    Convert common PostgreSQL URLs into the psycopg 3 SQLAlchemy format.
-
-    Railway may expose URLs beginning with postgres:// or postgresql://.
-    SQLAlchemy will use the psycopg 3 driver through postgresql+psycopg://.
-    """
+    """Normalize a PostgreSQL URL for SQLAlchemy and psycopg 3."""
     database_url = database_url.strip()
 
     if database_url.startswith("postgres://"):
@@ -37,13 +33,12 @@ def normalize_database_url(database_url: str) -> str:
 
 @lru_cache(maxsize=1)
 def get_engine() -> Engine:
-    """Create and cache the SQLAlchemy database engine."""
+    """Create and cache the SQLAlchemy engine."""
     settings = get_settings()
 
     if not settings.has_database_url:
         raise RuntimeError(
-            "DATABASE_URL is missing. Add it to your local .env file "
-            "or to the Railway service variables."
+            "DATABASE_URL is missing. Add it to the local .env file."
         )
 
     return create_engine(
@@ -66,14 +61,9 @@ def get_session_factory() -> sessionmaker[Session]:
     )
 
 
+@contextmanager
 def session_scope() -> Iterator[Session]:
-    """
-    Provide a database session with commit and rollback handling.
-
-    Usage:
-        with session_scope() as session:
-            ...
-    """
+    """Provide a transactional SQLAlchemy session."""
     session = get_session_factory()()
 
     try:
@@ -87,7 +77,7 @@ def session_scope() -> Iterator[Session]:
 
 
 def check_database_connection() -> dict[str, str | int]:
-    """Run a lightweight query and return database information."""
+    """Run a lightweight PostgreSQL connection test."""
     with get_engine().connect() as connection:
         result = connection.execute(
             text(
