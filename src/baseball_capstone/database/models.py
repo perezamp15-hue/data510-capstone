@@ -64,27 +64,67 @@ class Player(Base):
     """MLB player dimension."""
 
     __tablename__ = "players"
+    __table_args__ = (
+        Index("ix_players_full_name", "full_name"),
+        Index("ix_players_current_team_id", "current_team_id"),
+        Index("ix_players_active", "active"),
+    )
 
-    player_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    full_name: Mapped[str] = mapped_column(String(150), nullable=False)
+    player_id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+    )
+
+    full_name: Mapped[str] = mapped_column(
+        String(150),
+        nullable=False,
+    )
+
+    first_name: Mapped[str | None] = mapped_column(String(100))
+    last_name: Mapped[str | None] = mapped_column(String(100))
+    use_name: Mapped[str | None] = mapped_column(String(100))
+
     primary_position: Mapped[str | None] = mapped_column(String(10))
+    position_name: Mapped[str | None] = mapped_column(String(100))
+    position_type: Mapped[str | None] = mapped_column(String(50))
+
     bats: Mapped[str | None] = mapped_column(String(5))
     throws: Mapped[str | None] = mapped_column(String(5))
+
     birth_date: Mapped[date | None] = mapped_column(Date)
-    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    mlb_debut_date: Mapped[date | None] = mapped_column(Date)
+
+    height: Mapped[str | None] = mapped_column(String(20))
+    weight: Mapped[int | None] = mapped_column(Integer)
+    jersey_number: Mapped[str | None] = mapped_column(String(10))
+
+    active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+    )
+
+    roster_status: Mapped[str | None] = mapped_column(String(50))
 
     current_team_id: Mapped[int | None] = mapped_column(
         ForeignKey("teams.team_id"),
         nullable=True,
     )
 
-    current_team: Mapped[Team | None] = relationship()
+    current_team: Mapped[Team | None] = relationship(
+        foreign_keys=[current_team_id],
+    )
+
+    last_roster_check_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
     )
+
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
