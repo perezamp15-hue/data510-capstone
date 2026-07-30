@@ -7,3 +7,5 @@ python-dotenv>=1.0,<2.0
 pytest>=8.0,<10.0
 pytz
 pillow
+numpy>=1.26
+scikit-learn>=1.5,<2.0

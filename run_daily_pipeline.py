@@ -12,23 +12,23 @@ except ModuleNotFoundError as e:
 
 # PHASE ONE ANALYTICS FOUNDATION
 def run_analytics_foundation() -> None:
+    """Run optional validation only when its module exists."""
+    from importlib.util import find_spec
+
+    if find_spec("analytics.run_phase_one") is None:
+        print("Analytics foundation module is not installed; skipping Phase 4.")
+        return
+
     print("\n" + "=" * 70)
     print("Running Phase One Analytics Foundation")
     print("=" * 70)
 
     result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "analytics.run_phase_one",
-        ],
+        [sys.executable, "-m", "analytics.run_phase_one"],
         check=False,
     )
-
     if result.returncode != 0:
-        raise RuntimeError(
-            "Analytics foundation validation failed."
-        )
+        raise RuntimeError("Analytics foundation validation failed.")
 
     print("Analytics foundation completed successfully.")
 
