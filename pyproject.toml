@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "baseball-capstone"
+version = "0.1.0"
+description = "PostgreSQL-centered MLB analytics capstone"
+requires-python = ">=3.11"
+dependencies = [
+    "SQLAlchemy>=2.0,<3.0",
+    "psycopg[binary]>=3.2,<4.0",
+    "pydantic>=2.11,<3.0",
+    "pydantic-settings>=2.10,<3.0",
+    "python-dotenv>=1.1,<2.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"

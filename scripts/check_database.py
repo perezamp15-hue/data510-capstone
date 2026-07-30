@@ -1,27 +1,31 @@
-from __future__ import annotations
+"""Verify that the application can connect to PostgreSQL."""
 
 import json
 import sys
+from pathlib import Path
 
-from analytics.database import dispose_engine, test_database_connection
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SOURCE_DIRECTORY = PROJECT_ROOT / "src"
+
+if str(SOURCE_DIRECTORY) not in sys.path:
+    sys.path.insert(0, str(SOURCE_DIRECTORY))
+
+
+from baseball_capstone.database.engine import check_database_connection
 
 
 def main() -> int:
+    """Test the configured PostgreSQL connection."""
     try:
-        result = test_database_connection()
-        safe = {
-            "database_name": result["database_name"],
-            "database_user": result["database_user"],
-            "server_time": str(result["server_time"]),
-            "postgres_version": str(result["postgres_version"]).split(",")[0],
-        }
-        print(json.dumps(safe, indent=2))
-        return 0
+        database_information = check_database_connection()
     except Exception as exc:
-        print(f"Database check failed: {exc}", file=sys.stderr)
+        print(f"Database connection failed: {exc}")
         return 1
-    finally:
-        dispose_engine()
+
+    print("Database connection succeeded.")
+    print(json.dumps(database_information, indent=2, default=str))
+    return 0
 
 
 if __name__ == "__main__":

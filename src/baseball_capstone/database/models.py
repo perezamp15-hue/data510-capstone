@@ -1,0 +1,313 @@
+"""Core database models for MLB data collection."""
+
+from datetime import date, datetime
+from decimal import Decimal
+
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from baseball_capstone.database.base import Base
+
+
+class Team(Base):
+    """MLB team dimension."""
+
+    __tablename__ = "teams"
+
+    team_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    abbreviation: Mapped[str | None] = mapped_column(String(10))
+    league_name: Mapped[str | None] = mapped_column(String(50))
+    division_name: Mapped[str | None] = mapped_column(String(50))
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class Player(Base):
+    """MLB player dimension."""
+
+    __tablename__ = "players"
+
+    player_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    full_name: Mapped[str] = mapped_column(String(150), nullable=False)
+    primary_position: Mapped[str | None] = mapped_column(String(10))
+    bats: Mapped[str | None] = mapped_column(String(5))
+    throws: Mapped[str | None] = mapped_column(String(5))
+    birth_date: Mapped[date | None] = mapped_column(Date)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    current_team_id: Mapped[int | None] = mapped_column(
+        ForeignKey("teams.team_id"),
+        nullable=True,
+    )
+
+    current_team: Mapped[Team | None] = relationship()
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class Park(Base):
+    """MLB park and venue dimension."""
+
+    __tablename__ = "parks"
+
+    park_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(150), nullable=False)
+    city: Mapped[str | None] = mapped_column(String(100))
+    state: Mapped[str | None] = mapped_column(String(100))
+    country: Mapped[str | None] = mapped_column(String(100))
+    time_zone: Mapped[str | None] = mapped_column(String(100))
+    elevation_feet: Mapped[int | None] = mapped_column(Integer)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class Game(Base):
+    """One MLB game."""
+
+    __tablename__ = "games"
+    __table_args__ = (
+        Index("ix_games_game_date", "game_date"),
+        Index("ix_games_season", "season"),
+    )
+
+    game_pk: Mapped[int] = mapped_column(Integer, primary_key=True)
+    game_date: Mapped[date] = mapped_column(Date, nullable=False)
+    season: Mapped[int] = mapped_column(Integer, nullable=False)
+    game_type: Mapped[str | None] = mapped_column(String(10))
+    status: Mapped[str | None] = mapped_column(String(50))
+
+    home_team_id: Mapped[int] = mapped_column(
+        ForeignKey("teams.team_id"),
+        nullable=False,
+    )
+    away_team_id: Mapped[int] = mapped_column(
+        ForeignKey("teams.team_id"),
+        nullable=False,
+    )
+    park_id: Mapped[int | None] = mapped_column(
+        ForeignKey("parks.park_id"),
+        nullable=True,
+    )
+
+    home_score: Mapped[int | None] = mapped_column(Integer)
+    away_score: Mapped[int | None] = mapped_column(Integer)
+
+    day_night: Mapped[str | None] = mapped_column(String(10))
+    temperature_f: Mapped[int | None] = mapped_column(Integer)
+    wind_speed_mph: Mapped[int | None] = mapped_column(Integer)
+    wind_direction: Mapped[str | None] = mapped_column(String(100))
+    weather_condition: Mapped[str | None] = mapped_column(String(100))
+
+    home_team: Mapped[Team] = relationship(
+        foreign_keys=[home_team_id],
+    )
+    away_team: Mapped[Team] = relationship(
+        foreign_keys=[away_team_id],
+    )
+    park: Mapped[Park | None] = relationship()
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class Pitch(Base):
+    """Pitch-level Statcast observation."""
+
+    __tablename__ = "pitches"
+    __table_args__ = (
+        UniqueConstraint(
+            "game_pk",
+            "at_bat_number",
+            "pitch_number",
+            name="uq_pitches_game_at_bat_pitch",
+        ),
+        Index("ix_pitches_pitcher_id", "pitcher_id"),
+        Index("ix_pitches_batter_id", "batter_id"),
+        Index("ix_pitches_game_date", "game_date"),
+        Index("ix_pitches_pitch_type", "pitch_type"),
+    )
+
+    pitch_id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    game_pk: Mapped[int] = mapped_column(
+        ForeignKey("games.game_pk", ondelete="CASCADE"),
+        nullable=False,
+    )
+    game_date: Mapped[date] = mapped_column(Date, nullable=False)
+
+    at_bat_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    pitch_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    inning: Mapped[int | None] = mapped_column(Integer)
+    inning_half: Mapped[str | None] = mapped_column(String(10))
+    outs: Mapped[int | None] = mapped_column(Integer)
+
+    balls: Mapped[int | None] = mapped_column(Integer)
+    strikes: Mapped[int | None] = mapped_column(Integer)
+
+    pitcher_id: Mapped[int] = mapped_column(
+        ForeignKey("players.player_id"),
+        nullable=False,
+    )
+    batter_id: Mapped[int] = mapped_column(
+        ForeignKey("players.player_id"),
+        nullable=False,
+    )
+
+    pitch_type: Mapped[str | None] = mapped_column(String(10))
+    pitch_name: Mapped[str | None] = mapped_column(String(50))
+    description: Mapped[str | None] = mapped_column(String(100))
+    event: Mapped[str | None] = mapped_column(String(100))
+
+    release_speed: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
+    effective_speed: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
+    release_spin_rate: Mapped[int | None] = mapped_column(Integer)
+    release_extension: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
+
+    release_pos_x: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    release_pos_y: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    release_pos_z: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+
+    plate_x: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    plate_z: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    strike_zone_top: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    strike_zone_bottom: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+
+    pfx_x: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    pfx_z: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+
+    launch_speed: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
+    launch_angle: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
+    hit_distance: Mapped[Decimal | None] = mapped_column(Numeric(7, 2))
+
+    estimated_batting_average: Mapped[Decimal | None] = mapped_column(
+        Numeric(6, 5)
+    )
+    estimated_woba: Mapped[Decimal | None] = mapped_column(Numeric(6, 5))
+    estimated_slugging: Mapped[Decimal | None] = mapped_column(Numeric(6, 5))
+
+    zone: Mapped[int | None] = mapped_column(Integer)
+    type_code: Mapped[str | None] = mapped_column(String(5))
+
+    runner_on_first: Mapped[bool] = mapped_column(Boolean, default=False)
+    runner_on_second: Mapped[bool] = mapped_column(Boolean, default=False)
+    runner_on_third: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    raw_payload: Mapped[str | None] = mapped_column(Text)
+
+    game: Mapped[Game] = relationship()
+    pitcher: Mapped[Player] = relationship(foreign_keys=[pitcher_id])
+    batter: Mapped[Player] = relationship(foreign_keys=[batter_id])
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
+class CollectionRun(Base):
+    """Tracks each collector execution."""
+
+    __tablename__ = "collection_runs"
+
+    collection_run_id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    collector_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+
+    status: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        default="running",
+    )
+
+    requested_start_date: Mapped[date | None] = mapped_column(Date)
+    requested_end_date: Mapped[date | None] = mapped_column(Date)
+
+    records_read: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    records_inserted: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+    records_updated: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+    records_rejected: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+
+    error_message: Mapped[str | None] = mapped_column(Text)
