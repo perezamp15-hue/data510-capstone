@@ -12,6 +12,7 @@ from datetime import date
 from math import sqrt
 from typing import Any, Iterable, Sequence
 
+import numpy as np
 import pandas as pd
 from sqlalchemy import bindparam, inspect, text
 from sqlalchemy.engine import Engine
@@ -72,6 +73,24 @@ PITCH_NAMES = {
     "EP": "Eephus",
     "SV": "Slurve",
 }
+
+PITCH_COLORS = {
+    "Four-Seam Fastball": "#d62828",
+    "Sinker": "#f77f00",
+    "Cutter": "#fcbf49",
+    "Slider": "#6a4c93",
+    "Sweeper": "#8338ec",
+    "Curveball": "#3a86ff",
+    "Knuckle Curve": "#4361ee",
+    "Changeup": "#2a9d8f",
+    "Splitter": "#00b4d8",
+    "Forkball": "#48cae4",
+    "Knuckleball": "#8d99ae",
+    "Other": "#64748b",
+}
+
+def _pitch_color(label: str) -> str:
+    return PITCH_COLORS.get(str(label), PITCH_COLORS["Other"])
 
 
 @dataclass(frozen=True)
@@ -402,6 +421,8 @@ def load_pitch_data(
             p.strikes,
             p.pitcher_id,
             p.batter_id,
+            batter_dim.bats AS batter_bats,
+            pitcher_dim.throws AS pitcher_throws,
             p.pitch_type,
             p.pitch_name,
             p.description,
@@ -430,6 +451,8 @@ def load_pitch_data(
             p.estimated_slugging,
             p.zone
         FROM pitches p
+        LEFT JOIN players batter_dim ON batter_dim.player_id = p.batter_id
+        LEFT JOIN players pitcher_dim ON pitcher_dim.player_id = p.pitcher_id
         WHERE p.game_date BETWEEN :start_date AND :end_date
           AND (
             p.pitcher_id IN :pitcher_ids
@@ -477,6 +500,13 @@ def load_pitch_data(
         "estimated_slugging",
     ):
         frame[column] = pd.to_numeric(frame[column], errors="coerce")
+    frame["batter_bats"] = frame["batter_bats"].fillna("").astype(str).str.upper().str.strip()
+    frame["pitcher_throws"] = frame["pitcher_throws"].fillna("").astype(str).str.upper().str.strip()
+    frame["effective_batter_side"] = np.where(
+        frame["batter_bats"].eq("S"),
+        np.where(frame["pitcher_throws"].eq("L"), "R", "L"),
+        frame["batter_bats"],
+    )
     frame["description_norm"] = _normalize_text(frame["description"])
     frame["event_norm"] = _normalize_text(frame["event"].where(frame["event"].notna(), frame["event_type"]))
     frame["is_swing"] = frame["description_norm"].isin(SWING_DESCRIPTIONS)
@@ -502,6 +532,47 @@ def _plate_appearance_results(frame: pd.DataFrame) -> pd.DataFrame:
         return candidates
     candidates = candidates.sort_values(["game_pk", "at_bat_number", "pitch_number"])
     return candidates.groupby(["game_pk", "at_bat_number"], as_index=False).tail(1)
+
+
+def _split_summary(sample: pd.DataFrame, *, label: str) -> dict[str, Any]:
+    """Create a compact batting-result summary for a handedness-filtered sample."""
+    pitches = int(len(sample))
+    swings = int(sample["is_swing"].sum()) if pitches else 0
+    whiffs = int(sample["is_whiff"].sum()) if pitches else 0
+    pa = _plate_appearance_results(sample)
+    hits = int(pa["event_norm"].isin(HIT_EVENTS).sum()) if not pa.empty else 0
+    walks = int(pa["event_norm"].isin(WALK_EVENTS).sum()) if not pa.empty else 0
+    strikeouts = int(pa["event_norm"].isin(STRIKEOUT_EVENTS).sum()) if not pa.empty else 0
+    at_bats = max(0, int(len(pa) - walks))
+    total_bases = int(pa["event_norm"].map({"single": 1, "double": 2, "triple": 3, "home_run": 4}).fillna(0).sum()) if not pa.empty else 0
+    return {
+        "label": label,
+        "pitches": pitches,
+        "plate_appearances": int(len(pa)),
+        "avg": _rate(hits, at_bats),
+        "obp": _rate(hits + walks, len(pa)),
+        "slg": _rate(total_bases, at_bats),
+        "ops": ((_rate(hits + walks, len(pa)) or 0) + (_rate(total_bases, at_bats) or 0)) if len(pa) and at_bats else None,
+        "k_pct": _pct(strikeouts, len(pa)),
+        "bb_pct": _pct(walks, len(pa)),
+        "whiff_pct": _pct(whiffs, swings),
+        "csw_pct": _pct((sample["is_called_strike"] | sample["is_whiff"]).sum(), pitches),
+        "avg_velocity": _safe_float(sample["release_speed"].mean()),
+    }
+
+
+def _pitcher_handedness_splits(sample: pd.DataFrame) -> list[dict[str, Any]]:
+    return [
+        _split_summary(sample.loc[sample["effective_batter_side"].eq("L")], label="vs LHB"),
+        _split_summary(sample.loc[sample["effective_batter_side"].eq("R")], label="vs RHB"),
+    ]
+
+
+def _batter_handedness_splits(sample: pd.DataFrame) -> list[dict[str, Any]]:
+    return [
+        _split_summary(sample.loc[sample["pitcher_throws"].eq("L")], label="vs LHP"),
+        _split_summary(sample.loc[sample["pitcher_throws"].eq("R")], label="vs RHP"),
+    ]
 
 
 def pitcher_summary(frame: pd.DataFrame, pitcher: PlayerIdentity) -> dict[str, Any]:
@@ -570,7 +641,7 @@ def pitcher_summary(frame: pd.DataFrame, pitcher: PlayerIdentity) -> dict[str, A
         },
         "arsenal": pitcher_arsenal(sample),
         "count_tendencies": pitch_probabilities(sample, group_columns=("balls", "strikes"), minimum_sample=1),
-        "handedness_tendencies": [],
+        "handedness_tendencies": _pitcher_handedness_splits(sample),
     }
 
 
@@ -618,8 +689,17 @@ def pitcher_arsenal(sample: pd.DataFrame) -> list[dict[str, Any]]:
     return sorted(rows, key=lambda row: row["count"], reverse=True)
 
 
-def batter_summary(frame: pd.DataFrame, batter: PlayerIdentity) -> dict[str, Any]:
-    sample = frame.loc[frame["batter_id"].eq(batter.player_id)].copy()
+def batter_summary(
+    frame: pd.DataFrame,
+    batter: PlayerIdentity,
+    *,
+    sample_override: pd.DataFrame | None = None,
+) -> dict[str, Any]:
+    sample = (
+        sample_override.copy()
+        if sample_override is not None
+        else frame.loc[frame["batter_id"].eq(batter.player_id)].copy()
+    )
     pitches = len(sample)
     swings = int(sample["is_swing"].sum()) if pitches else 0
     whiffs = int(sample["is_whiff"].sum()) if pitches else 0
@@ -646,8 +726,15 @@ def batter_summary(frame: pd.DataFrame, batter: PlayerIdentity) -> dict[str, Any
             "at_bats_estimate": at_bats,
             "batting_average_estimate": batting_average,
             "on_base_rate_estimate": on_base,
+            # Split-result rates are calculated here so the template does not
+            # depend on optional nested values or repeat rate math.
+            "walk_rate": _pct(walks, len(pa)),
+            "hit_rate_per_pa": _pct(hits, len(pa)),
         },
         "rates": {
+            "walk_rate": _pct(walks, len(pa)),
+            "batting_average": batting_average,
+            "on_base_rate": on_base,
             "swing_rate": _pct(swings, pitches),
             "whiff_rate_per_swing": _pct(whiffs, swings),
             "contact_rate_per_swing": _pct(sample["is_contact"].sum(), swings),
@@ -668,6 +755,9 @@ def batter_summary(frame: pd.DataFrame, batter: PlayerIdentity) -> dict[str, Any
         "pitch_type_performance": batter_pitch_type_performance(sample),
         "zone_performance": batter_zone_performance(sample),
         "batted_ball_profile": _batted_ball_profile(sample),
+        "handedness_splits": _batter_handedness_splits(
+            frame.loc[frame["batter_id"].eq(batter.player_id)].copy()
+        ),
     }
 
 
@@ -1007,6 +1097,110 @@ def _pitch_tunneling_proxy(sample: pd.DataFrame, *, minimum_pitches: int = 20, l
     }
 
 
+
+def _takeaway_items(summary: dict[str, Any], *, role: str) -> list[str]:
+    """Create short, data-grounded scouting takeaways from an existing profile."""
+    rates = summary.get("rates", {})
+    averages = summary.get("averages", {})
+    sample = summary.get("sample", {})
+    items: list[str] = []
+    whiff = rates.get("whiff_rate_per_swing")
+    chase = rates.get("chase_rate")
+    zone = rates.get("zone_rate")
+    ev = averages.get("exit_velocity")
+    if role == "pitcher":
+        if whiff is not None:
+            items.append(f"Misses bats at a {whiff:.1f}% whiff-per-swing rate.")
+        if chase is not None:
+            items.append(f"Generates chase on {chase:.1f}% of out-of-zone pitches.")
+        if zone is not None:
+            items.append(f"Works in the strike zone {zone:.1f}% of the time.")
+        arsenal = summary.get("arsenal", [])
+        if arsenal:
+            primary = arsenal[0]
+            items.append(f"Primary offering is {primary['pitch']} at {primary.get('usage_pct') or 0:.1f}% usage.")
+    else:
+        contact = rates.get("contact_rate_per_swing")
+        if whiff is not None:
+            items.append(f"Whiffs on {whiff:.1f}% of swings in this split.")
+        if contact is not None:
+            items.append(f"Makes contact on {contact:.1f}% of swings.")
+        if chase is not None:
+            items.append(f"Chases {chase:.1f}% of pitches outside the zone.")
+        if ev is not None:
+            items.append(f"Average exit velocity is {ev:.1f} mph.")
+    if sample.get("pitches", 0) < 100:
+        items.append("Treat this result as a limited-sample indicator.")
+    return items[:4]
+
+
+def _pitch_type_heatmaps(sample: pd.DataFrame, *, minimum_pitches: int = 20) -> list[dict[str, Any]]:
+    """Build one continuous strike-zone heatmap per pitch type."""
+    if sample.empty:
+        return []
+    maps: list[dict[str, Any]] = []
+    total = len(sample)
+    for pitch, group in sample.groupby("pitch_label", dropna=False):
+        if len(group) < minimum_pitches:
+            continue
+        maps.append({
+            "pitch": str(pitch),
+            "count": int(len(group)),
+            "usage_pct": _pct(len(group), total),
+            "heatmap": _enhanced_location_heatmap(group),
+        })
+    return sorted(maps, key=lambda row: row["count"], reverse=True)
+
+
+def _pitcher_split_page(
+    sample: pd.DataFrame,
+    pitcher: PlayerIdentity,
+    *,
+    batter_side: str | None,
+    key: str,
+    label: str,
+) -> dict[str, Any]:
+    """Build a complete pitcher page for overall, vs-LHB, or vs-RHB context."""
+    selected = sample.copy()
+    if batter_side in {"L", "R"}:
+        selected = selected.loc[selected["effective_batter_side"].eq(batter_side)].copy()
+
+    summary = pitcher_summary(selected, pitcher)
+    # Store a direct result line for the exact page sample. Previously the
+    # template read handedness_tendencies[0], which is the empty LHB row on
+    # a vs-RHB page and caused K%, AVG, and related values to appear blank.
+    summary["result_split"] = _split_summary(selected, label=label)
+    summary["takeaways"] = _takeaway_items(summary, role="pitcher")
+    summary["enhanced_heatmap"] = _enhanced_location_heatmap(selected)
+    summary["pitch_type_heatmaps"] = _pitch_type_heatmaps(selected)
+    summary["sequences"] = sequence_probabilities(selected, limit=8)
+    summary["count_tendencies"] = pitch_probabilities(
+        selected, group_columns=("balls", "strikes"), minimum_sample=5
+    )
+    return {
+        "key": key,
+        "label": label,
+        "batter_side": batter_side,
+        "pitches": int(len(selected)),
+        "summary": summary,
+    }
+
+
+def _batter_split_page(sample: pd.DataFrame, batter: PlayerIdentity, pitcher_hand: str) -> dict[str, Any]:
+    split = sample.loc[sample["pitcher_throws"].eq(pitcher_hand)].copy()
+    summary = batter_summary(sample, batter, sample_override=split)
+    return {
+        "key": f"vs-{pitcher_hand.lower()}hp",
+        "label": f"vs {pitcher_hand}HP",
+        "pitches": int(len(split)),
+        "summary": summary,
+        "tools": _batter_tools(summary),
+        "takeaways": _takeaway_items(summary, role="batter"),
+        "pitch_type_performance": batter_pitch_type_performance(split),
+        "zone_performance": batter_zone_performance(split),
+        "enhanced_heatmap": _enhanced_location_heatmap(split),
+    }
+
 def matchup_analysis(
     frame: pd.DataFrame,
     *,
@@ -1018,8 +1212,25 @@ def matchup_analysis(
     exact = pitcher_sample.loc[pitcher_sample["batter_id"].eq(batter.player_id)].copy()
     batter_all = frame.loc[frame["batter_id"].eq(batter.player_id)].copy()
 
-    weakness_source = exact if len(exact) >= 20 else batter_all
-    weakness_label = "Exact matchup" if len(exact) >= 20 else "Batter historical profile"
+    pitcher_hand = (pitcher.throws or "").upper()
+    batter_side = (batter.bats or "").upper()
+    if batter_side == "S":
+        batter_side = "R" if pitcher_hand == "L" else "L"
+
+    pitcher_split = pitcher_sample.loc[
+        pitcher_sample["effective_batter_side"].eq(batter_side)
+    ].copy()
+    batter_split = batter_all.loc[batter_all["pitcher_throws"].eq(pitcher_hand)].copy()
+
+    if len(exact) >= 20:
+        weakness_source = exact
+        weakness_label = "Exact matchup"
+    elif len(batter_split) >= 20:
+        weakness_source = batter_split
+        weakness_label = f"Batter vs {pitcher_hand}HP"
+    else:
+        weakness_source = batter_all
+        weakness_label = "Batter historical profile"
     pitch_perf = batter_pitch_type_performance(weakness_source)
     zone_perf = batter_zone_performance(weakness_source)
 
@@ -1048,9 +1259,23 @@ def matchup_analysis(
         "exact_matchup_pitches": int(len(exact)),
         "weakness_source": weakness_label,
         "weakness_sample": int(len(weakness_source)),
+        "matchup_split": {
+            "pitcher_hand": pitcher_hand,
+            "batter_side": batter_side,
+            "label": f"{batter_side}HB vs {pitcher_hand}HP",
+            "pitcher_split_pitches": int(len(pitcher_split)),
+            "batter_split_pitches": int(len(batter_split)),
+        },
         "confidence": confidence,
-        "batter_summary": batter_summary(frame, batter),
-        "batter_tools": _batter_tools(batter_summary(frame, batter)),
+        "batter_summary": batter_summary(frame, batter, sample_override=weakness_source),
+        "batter_tools": _batter_tools(batter_summary(frame, batter, sample_override=weakness_source)),
+        "batter_split_pages": [
+            _batter_split_page(batter_all, batter, "L"),
+            _batter_split_page(batter_all, batter, "R"),
+        ],
+        "takeaways": _takeaway_items(
+            batter_summary(frame, batter, sample_override=weakness_source), role="batter"
+        ),
         "rolling_trends": _rolling_trends(batter_all, role="batter"),
         "weak_pitches": weak_pitches,
         "damage_pitches": damage_pitches,
@@ -1058,16 +1283,21 @@ def matchup_analysis(
         "damage_zones": damage_zones,
         "whiff_heatmap": _zone_grid(zone_perf, "whiff_pct"),
         "damage_heatmap": _zone_grid(zone_perf, "hard_hit_pct"),
-        "pitcher_location_heatmap": _zone_grid(batter_zone_performance(pitcher_sample), "usage_pct"),
+        "pitcher_location_heatmap": _zone_grid(batter_zone_performance(pitcher_split), "usage_pct"),
+        # Use the same continuous 7x7 plate-coordinate view for hitters and pitchers.
+        # The batter map is based on the selected weakness sample; the attack map is
+        # based on every pitch thrown by the opposing pitcher in the selected range.
+        "enhanced_batter_heatmap": _enhanced_location_heatmap(weakness_source),
+        "enhanced_pitcher_heatmap": _enhanced_location_heatmap(pitcher_split),
         "count_probabilities": matchup_pitch_probabilities(
-            pitcher_sample,
+            pitcher_split,
             batter_id=batter.player_id,
         ),
         "sequences": sequence_probabilities(
-            pitcher_sample,
+            pitcher_split,
             batter_id=batter.player_id,
         ),
-        "strikeout_sequence": _common_strikeout_sequence(pitcher_sample, batter.player_id),
+        "strikeout_sequence": _common_strikeout_sequence(pitcher_split, batter.player_id),
     }
 
 
@@ -1208,6 +1438,253 @@ def _game_plan(pitcher_profile: dict[str, Any], matchups: list[dict[str, Any]]) 
         ],
     }
 
+
+def _enhanced_location_heatmap(sample: pd.DataFrame, *, bins: int = 7) -> dict[str, Any]:
+    """Build stable plate-coordinate heatmaps using catcher-view Statcast locations.
+
+    Percent cells are suppressed when the denominator is too small. This prevents
+    one whiff on one swing from displaying as a misleading 100% hot cell. Damage
+    uses hard-hit rate because ``estimated_slugging`` is sparsely populated in the
+    current warehouse.
+    """
+    clean = sample.loc[sample["plate_x"].notna() & sample["plate_z"].notna()].copy()
+    empty = {"available": False, "bins": bins, "usage": [], "whiff": [], "damage": [], "sample": 0}
+    if clean.empty:
+        return empty
+
+    x_min, x_max = -1.75, 1.75
+    z_min, z_max = 0.75, 4.25
+    clean = clean.loc[clean["plate_x"].between(x_min, x_max) & clean["plate_z"].between(z_min, z_max)]
+    if clean.empty:
+        return empty
+
+    # Explicit edges keep the grid physically consistent from report to report.
+    x_edges = np.linspace(x_min, x_max, bins + 1)
+    z_edges = np.linspace(z_min, z_max, bins + 1)
+    clean["x_bin"] = pd.cut(clean["plate_x"], bins=x_edges, labels=False, include_lowest=True)
+    clean["z_bin"] = pd.cut(clean["plate_z"], bins=z_edges, labels=False, include_lowest=True)
+
+    total = len(clean)
+    cells: list[dict[str, Any]] = []
+    min_swings = 5
+    min_batted_balls = 3
+
+    for z in reversed(range(bins)):
+        for x in range(bins):
+            group = clean.loc[clean["x_bin"].eq(x) & clean["z_bin"].eq(z)]
+            swings = int(group["is_swing"].fillna(False).sum())
+            whiffs = int(group["is_whiff"].fillna(False).sum())
+            batted = group.loc[group["launch_speed"].notna()].copy()
+            batted_count = int(len(batted))
+            hard_hits = int(batted["is_hard_hit"].fillna(False).sum()) if batted_count else 0
+
+            cells.append({
+                "x": x,
+                "z": z,
+                "pitches": int(len(group)),
+                "swings": swings,
+                "batted_balls": batted_count,
+                "usage": _pct(len(group), total),
+                "whiff": _pct(whiffs, swings) if swings >= min_swings else None,
+                "damage": _pct(hard_hits, batted_count) if batted_count >= min_batted_balls else None,
+            })
+
+    def scale(key: str) -> list[dict[str, Any]]:
+        vals = [float(c[key]) for c in cells if c[key] is not None and not pd.isna(c[key])]
+        lo = min(vals) if vals else 0.0
+        hi = max(vals) if vals else 0.0
+        span = hi - lo
+        out = []
+        for cell in cells:
+            value = cell[key]
+            intensity = 0.0 if value is None else (0.5 if span == 0 else (float(value) - lo) / span)
+            out.append({**cell, "value": value, "intensity": round(max(0.0, min(1.0, intensity)), 3)})
+        return out
+
+    return {
+        "available": True,
+        "bins": bins,
+        "usage": scale("usage"),
+        "whiff": scale("whiff"),
+        "damage": scale("damage"),
+        "sample": int(total),
+        "minimum_swings": min_swings,
+        "minimum_batted_balls": min_batted_balls,
+    }
+
+
+def _pitcher_inning_progression(sample: pd.DataFrame) -> list[dict[str, Any]]:
+    """Summarize pitcher effectiveness by inning, including velocity and contact quality."""
+    rows=[]
+    for inning, group in sample.loc[sample["inning"].notna()].groupby("inning"):
+        pa=_plate_appearance_results(group)
+        hits=int(pa["event_norm"].isin(HIT_EVENTS).sum()) if not pa.empty else 0
+        walks=int(pa["event_norm"].isin(WALK_EVENTS).sum()) if not pa.empty else 0
+        strikeouts=int(pa["event_norm"].isin(STRIKEOUT_EVENTS).sum()) if not pa.empty else 0
+        at_bats=max(0, len(pa)-walks)
+        total_bases=0
+        if not pa.empty:
+            total_bases=int(pa["event_norm"].map({"single":1,"double":2,"triple":3,"home_run":4}).fillna(0).sum())
+        batted=group.loc[group["launch_speed"].notna()]
+        swings=int(group["is_swing"].sum())
+        rows.append({
+            "inning": int(inning), "pitches": int(len(group)), "plate_appearances": int(len(pa)),
+            "avg": _rate(hits, at_bats), "obp": _rate(hits+walks, len(pa)),
+            "slg": _rate(total_bases, at_bats), "ops": ((_rate(hits+walks,len(pa)) or 0)+(_rate(total_bases,at_bats) or 0)) if len(pa) and at_bats else None,
+            "k_pct": _pct(strikeouts, len(pa)), "bb_pct": _pct(walks, len(pa)),
+            "avg_velocity": _safe_float(group["release_speed"].mean()), "avg_spin": _safe_float(group["release_spin_rate"].mean()),
+            "whiff_pct": _pct(group["is_whiff"].sum(), swings), "hard_hit_pct": _pct(batted["is_hard_hit"].sum(), len(batted)),
+        })
+    return sorted(rows, key=lambda r:r["inning"])
+
+
+def _release_point_profile(sample: pd.DataFrame) -> dict[str, Any]:
+    """Create a physically consistent catcher-view release plot.
+
+    A fixed coordinate window is used for every pitcher. The previous adaptive
+    zoom stretched a normal six-to-eight-inch release spread across the entire
+    chart, making Yamamoto's release cloud look distorted. Statcast horizontal
+    release position is mirrored only when converting to the viewer's catcher
+    perspective.
+    """
+    clean = sample.loc[
+        sample["release_pos_x"].notna() & sample["release_pos_z"].notna()
+    ].copy()
+    if clean.empty:
+        return {"available": False, "points": [], "summary": []}
+
+    clean = clean.loc[
+        clean["release_pos_x"].between(-3.5, 3.5)
+        & clean["release_pos_z"].between(3.5, 8.0)
+    ].copy()
+    if clean.empty:
+        return {"available": False, "points": [], "summary": []}
+
+    # Remove tracking outliers independently within each pitch type.
+    retained = []
+    for _, group in clean.groupby("pitch_label", dropna=False):
+        if len(group) < 8:
+            retained.append(group)
+            continue
+        x_lo, x_hi = group["release_pos_x"].quantile([0.01, 0.99])
+        z_lo, z_hi = group["release_pos_z"].quantile([0.01, 0.99])
+        retained.append(group.loc[
+            group["release_pos_x"].between(x_lo, x_hi)
+            & group["release_pos_z"].between(z_lo, z_hi)
+        ])
+    clean = pd.concat(retained, ignore_index=True) if retained else clean
+
+    # Fixed physical window: six feet horizontally and four feet vertically.
+    x_min, x_max = -3.0, 3.0
+    z_min, z_max = 4.0, 8.0
+    plot_left, plot_right = 62.0, 498.0
+    plot_top, plot_bottom = 30.0, 226.0
+
+    def screen_x(value: float) -> float:
+        catcher_x = -float(value)
+        return plot_left + (catcher_x - x_min) / (x_max - x_min) * (plot_right - plot_left)
+
+    def screen_y(value: float) -> float:
+        return plot_bottom - (float(value) - z_min) / (z_max - z_min) * (plot_bottom - plot_top)
+
+    summary: list[dict[str, Any]] = []
+    points: list[dict[str, Any]] = []
+    labels = list(clean["pitch_label"].value_counts().index)
+    for idx, label in enumerate(labels):
+        group = clean.loc[clean["pitch_label"].eq(label)]
+        mean_x = _safe_float(group["release_pos_x"].mean())
+        mean_z = _safe_float(group["release_pos_z"].mean())
+        if mean_x is None or mean_z is None:
+            continue
+        summary.append({
+            "pitch": str(label),
+            "count": int(len(group)),
+            "release_x": mean_x,
+            "release_z": mean_z,
+            "plot_x": screen_x(mean_x),
+            "plot_y": screen_y(mean_z),
+            "sd_x_inches": _safe_float(group["release_pos_x"].std() * 12),
+            "sd_z_inches": _safe_float(group["release_pos_z"].std() * 12),
+            "extension": _safe_float(group["release_extension"].mean()),
+            "series": idx % 6 + 1,
+            "color": _pitch_color(str(label)),
+        })
+        sampled = group.sample(min(len(group), 65), random_state=42)
+        for row in sampled.itertuples(index=False):
+            points.append({
+                "pitch": str(label),
+                "x": float(row.release_pos_x),
+                "z": float(row.release_pos_z),
+                "plot_x": screen_x(float(row.release_pos_x)),
+                "plot_y": screen_y(float(row.release_pos_z)),
+                "series": idx % 6 + 1,
+                "color": _pitch_color(str(label)),
+            })
+
+    overall_sd = ((clean["release_pos_x"].std() ** 2 + clean["release_pos_z"].std() ** 2) ** 0.5) * 12
+    grade = _scouting_grade(overall_sd, low=1.5, high=8.0, inverse=True)
+    median_x = float(clean["release_pos_x"].median())
+    # Raw negative x is the pitcher's arm-side for a typical RHP; label from mound perspective.
+    arm_side = "first-base side" if median_x < 0 else "third-base side"
+    mean_release_height = _safe_float(clean["release_pos_z"].mean())
+    mean_extension = _safe_float(clean["release_extension"].mean())
+    primary_pitch = str(clean["pitch_label"].value_counts().index[0]) if not clean.empty else None
+    if mean_release_height is None:
+        arm_slot = "Not classified"
+    elif mean_release_height >= 6.2:
+        arm_slot = "High three-quarter"
+    elif mean_release_height >= 5.5:
+        arm_slot = "Three-quarter"
+    elif mean_release_height >= 4.8:
+        arm_slot = "Low three-quarter"
+    else:
+        arm_slot = "Sidearm"
+    return {
+        "available": True,
+        "points": points,
+        "summary": summary,
+        "overall_sd_inches": _safe_float(overall_sd),
+        "consistency_grade": grade,
+        "x_min": x_min,
+        "x_max": x_max,
+        "z_min": z_min,
+        "z_max": z_max,
+        "arm_side": arm_side,
+        "median_release_x": median_x,
+        "release_height": mean_release_height,
+        "extension": mean_extension,
+        "primary_pitch": primary_pitch,
+        "arm_slot": arm_slot,
+    }
+
+
+def _team_rolling_overview(frame: pd.DataFrame, lineup: Sequence[PlayerIdentity]) -> dict[str, Any]:
+    """Compute full-period offense and recent rolling windows for a projected lineup."""
+    ids=[p.player_id for p in lineup]
+    sample=frame.loc[frame["batter_id"].isin(ids)].copy()
+    if sample.empty:
+        return {"available":False,"windows":[]}
+    dates=sorted(d for d in sample["game_date"].dropna().dt.date.unique())
+    windows=[]
+    for window in (7,15,30):
+        selected_dates=set(dates[-window:])
+        group=sample.loc[sample["game_date"].dt.date.isin(selected_dates)]
+        pa=_plate_appearance_results(group)
+        hits=int(pa["event_norm"].isin(HIT_EVENTS).sum()) if not pa.empty else 0
+        walks=int(pa["event_norm"].isin(WALK_EVENTS).sum()) if not pa.empty else 0
+        strikeouts=int(pa["event_norm"].isin(STRIKEOUT_EVENTS).sum()) if not pa.empty else 0
+        at_bats=max(0,len(pa)-walks)
+        total_bases=int(pa["event_norm"].map({"single":1,"double":2,"triple":3,"home_run":4}).fillna(0).sum()) if not pa.empty else 0
+        batted=group.loc[group["launch_speed"].notna()]
+        windows.append({
+            "window":window,"games":int(group["game_pk"].nunique()),"pa":int(len(pa)),
+            "avg":_rate(hits,at_bats),"obp":_rate(hits+walks,len(pa)),"slg":_rate(total_bases,at_bats),
+            "ops":((_rate(hits+walks,len(pa)) or 0)+(_rate(total_bases,at_bats) or 0)) if len(pa) and at_bats else None,
+            "k_pct":_pct(strikeouts,len(pa)),"bb_pct":_pct(walks,len(pa)),
+            "hard_hit_pct":_pct(batted["is_hard_hit"].sum(),len(batted)),"avg_ev":_safe_float(batted["launch_speed"].mean()),
+        })
+    return {"available":True,"windows":windows,"date_count":len(dates)}
+
 def build_statistical_report(
     engine: Engine,
     *,
@@ -1248,6 +1725,26 @@ def build_statistical_report(
     opposing_pitcher_profile["pitch_tunneling"] = _pitch_tunneling_proxy(opposing_pitcher_sample)
     our_pitcher_profile["rolling_trends"] = _rolling_trends(our_pitcher_sample, role="pitcher")
     opposing_pitcher_profile["rolling_trends"] = _rolling_trends(opposing_pitcher_sample, role="pitcher")
+    our_pitcher_profile["inning_progression"] = _pitcher_inning_progression(our_pitcher_sample)
+    opposing_pitcher_profile["inning_progression"] = _pitcher_inning_progression(opposing_pitcher_sample)
+    our_pitcher_profile["release_profile"] = _release_point_profile(our_pitcher_sample)
+    opposing_pitcher_profile["release_profile"] = _release_point_profile(opposing_pitcher_sample)
+    our_pitcher_profile["enhanced_heatmap"] = _enhanced_location_heatmap(our_pitcher_sample)
+    opposing_pitcher_profile["enhanced_heatmap"] = _enhanced_location_heatmap(opposing_pitcher_sample)
+    our_pitcher_profile["pitch_type_heatmaps"] = _pitch_type_heatmaps(our_pitcher_sample)
+    opposing_pitcher_profile["pitch_type_heatmaps"] = _pitch_type_heatmaps(opposing_pitcher_sample)
+    our_pitcher_profile["takeaways"] = _takeaway_items(our_pitcher_profile, role="pitcher")
+    opposing_pitcher_profile["takeaways"] = _takeaway_items(opposing_pitcher_profile, role="pitcher")
+    our_pitcher_profile["split_pages"] = [
+        _pitcher_split_page(our_pitcher_sample, our_pitcher, batter_side=None, key="overall", label="Overall"),
+        _pitcher_split_page(our_pitcher_sample, our_pitcher, batter_side="L", key="vs-lhb", label="vs LHB"),
+        _pitcher_split_page(our_pitcher_sample, our_pitcher, batter_side="R", key="vs-rhb", label="vs RHB"),
+    ]
+    opposing_pitcher_profile["split_pages"] = [
+        _pitcher_split_page(opposing_pitcher_sample, opposing_pitcher, batter_side=None, key="overall", label="Overall"),
+        _pitcher_split_page(opposing_pitcher_sample, opposing_pitcher, batter_side="L", key="vs-lhb", label="vs LHB"),
+        _pitcher_split_page(opposing_pitcher_sample, opposing_pitcher, batter_side="R", key="vs-rhb", label="vs RHB"),
+    ]
 
     executive_summary = {
         "opposing_primary_pitches": [row["pitch"] for row in opposing_pitcher_profile["arsenal"][:3]],
@@ -1291,6 +1788,8 @@ def build_statistical_report(
         "executive_summary": executive_summary,
         "our_team_comparison": _team_comparison(frame, our_lineup),
         "opponent_team_comparison": _team_comparison(frame, opponent_lineup),
+        "our_team_rolling": _team_rolling_overview(frame, our_lineup),
+        "opponent_team_rolling": _team_rolling_overview(frame, opponent_lineup),
         "our_game_plan": _game_plan(opposing_pitcher_profile, our_offense),
         "opponent_game_plan": _game_plan(our_pitcher_profile, opponent_offense),
         "methodology": [

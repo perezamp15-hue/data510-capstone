@@ -47,3 +47,6 @@ logs/*
 *.sqlite3
 *.tmp
 *.log
+
+# Python packaging metadata
+*.egg-info/
