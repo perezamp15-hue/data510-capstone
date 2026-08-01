@@ -43,6 +43,25 @@ BALL_DESCRIPTIONS = {
 }
 CONTACT_DESCRIPTIONS = SWING_DESCRIPTIONS - WHIFF_DESCRIPTIONS
 HIT_EVENTS = {"single", "double", "triple", "home_run"}
+IN_PLAY_EVENTS = {
+    "single",
+    "double",
+    "triple",
+    "home_run",
+    "field_out",
+    "force_out",
+    "grounded_into_double_play",
+    "fielders_choice",
+    "fielders_choice_out",
+    "double_play",
+    "triple_play",
+    "sac_fly",
+    "sac_bunt",
+    "lineout",
+    "flyout",
+    "groundout",
+    "popup",
+}
 WALK_EVENTS = {"walk", "intent_walk"}
 STRIKEOUT_EVENTS = {"strikeout", "strikeout_double_play"}
 OUT_EVENTS = {
@@ -877,7 +896,7 @@ def matchup_pitch_probabilities(
     pitcher_sample: pd.DataFrame,
     *,
     batter_id: int,
-    important_counts: Iterable[tuple[int, int]] = ((0, 0), (0, 1), (1, 0), (1, 1), (1, 2), (2, 2), (3, 2)),
+    important_counts: Iterable[tuple[int, int]] = tuple((balls, strikes) for balls in range(4) for strikes in range(3)),
 ) -> list[dict[str, Any]]:
     """Empirical pitch probabilities with transparent sample fallback.
 
@@ -1025,6 +1044,9 @@ def _rolling_trends(sample: pd.DataFrame, *, role: str, window: int = 5, limit: 
             "label": label,
             "suffix": suffix,
             "latest": finite_values[-1] if finite_values else None,
+            "axis_min": low,
+            "axis_mid": (low + high) / 2.0,
+            "axis_max": high,
             "points": points,
         })
 
@@ -1174,8 +1196,12 @@ def _pitcher_split_page(
     summary["enhanced_heatmap"] = _enhanced_location_heatmap(selected)
     summary["pitch_type_heatmaps"] = _pitch_type_heatmaps(selected)
     summary["sequences"] = sequence_probabilities(selected, limit=8)
+    valid_counts = selected.loc[
+        selected["balls"].between(0, 3, inclusive="both")
+        & selected["strikes"].between(0, 2, inclusive="both")
+    ].copy()
     summary["count_tendencies"] = pitch_probabilities(
-        selected, group_columns=("balls", "strikes"), minimum_sample=5
+        valid_counts, group_columns=("balls", "strikes"), minimum_sample=5
     )
     return {
         "key": key,
@@ -1234,12 +1260,19 @@ def matchup_analysis(
     pitch_perf = batter_pitch_type_performance(weakness_source)
     zone_perf = batter_zone_performance(weakness_source)
 
+    # Build the attack plan from this pitcher's actual arsenal first, then
+    # rank only those pitches by how the opposing hitter has handled them.
+    pitcher_arsenal = set(pitcher_split["pitch_label"].dropna().astype(str).unique())
+    arsenal_pitch_perf = [row for row in pitch_perf if row.get("pitch") in pitcher_arsenal]
+    if not arsenal_pitch_perf:
+        arsenal_pitch_perf = pitch_perf
+
     weak_pitches = sorted(
-        [row for row in pitch_perf if row["pitches"] >= 10],
+        [row for row in arsenal_pitch_perf if row["pitches"] >= 10],
         key=lambda row: (-(row["whiff_pct"] or 0), row["hard_hit_pct"] or 100),
     )[:3]
     damage_pitches = sorted(
-        [row for row in pitch_perf if row["pitches"] >= 10],
+        [row for row in arsenal_pitch_perf if row["pitches"] >= 10],
         key=lambda row: (-(row["hard_hit_pct"] or 0), -(row["avg_exit_velocity"] or 0)),
     )[:3]
     weak_zones = sorted(
@@ -1250,6 +1283,19 @@ def matchup_analysis(
         [row for row in zone_perf if row["pitches"] >= 8],
         key=lambda row: (-(row["hard_hit_pct"] or 0), -(row["avg_exit_velocity"] or 0)),
     )[:3]
+
+    offensive_plan = {
+        "attack_pitches": damage_pitches,
+        "avoid_pitches": weak_pitches,
+        "attack_zones": damage_zones,
+        "protect_zones": weak_zones,
+    }
+    pitching_plan = {
+        "primary_pitches": weak_pitches,
+        "avoid_pitches": damage_pitches,
+        "attack_zones": weak_zones,
+        "avoid_zones": damage_zones,
+    }
 
     confidence = confidence_label(len(exact), len(weakness_source))
     return {
@@ -1281,6 +1327,8 @@ def matchup_analysis(
         "damage_pitches": damage_pitches,
         "weak_zones": weak_zones,
         "damage_zones": damage_zones,
+        "offensive_plan": offensive_plan,
+        "pitching_plan": pitching_plan,
         "whiff_heatmap": _zone_grid(zone_perf, "whiff_pct"),
         "damage_heatmap": _zone_grid(zone_perf, "hard_hit_pct"),
         "pitcher_location_heatmap": _zone_grid(batter_zone_performance(pitcher_split), "usage_pct"),
@@ -1448,7 +1496,7 @@ def _enhanced_location_heatmap(sample: pd.DataFrame, *, bins: int = 7) -> dict[s
     current warehouse.
     """
     clean = sample.loc[sample["plate_x"].notna() & sample["plate_z"].notna()].copy()
-    empty = {"available": False, "bins": bins, "usage": [], "whiff": [], "damage": [], "sample": 0}
+    empty = {"available": False, "bins": bins, "usage": [], "whiff": [], "hit": [], "damage": [], "sample": 0}
     if clean.empty:
         return empty
 
@@ -1477,15 +1525,19 @@ def _enhanced_location_heatmap(sample: pd.DataFrame, *, bins: int = 7) -> dict[s
             batted = group.loc[group["launch_speed"].notna()].copy()
             batted_count = int(len(batted))
             hard_hits = int(batted["is_hard_hit"].fillna(False).sum()) if batted_count else 0
+            events = group.get("event_norm", group.get("events", pd.Series(index=group.index, dtype=str))).fillna("").astype(str).str.lower()
+            hits = int(events.isin(HIT_EVENTS).sum())
+            balls_in_play = int(events.isin(IN_PLAY_EVENTS).sum())
 
             cells.append({
                 "x": x,
                 "z": z,
                 "pitches": int(len(group)),
                 "swings": swings,
-                "batted_balls": batted_count,
+                "batted_balls": balls_in_play,
                 "usage": _pct(len(group), total),
                 "whiff": _pct(whiffs, swings) if swings >= min_swings else None,
+                "hit": _pct(hits, balls_in_play) if balls_in_play >= min_batted_balls else None,
                 "damage": _pct(hard_hits, batted_count) if batted_count >= min_batted_balls else None,
             })
 
@@ -1506,6 +1558,7 @@ def _enhanced_location_heatmap(sample: pd.DataFrame, *, bins: int = 7) -> dict[s
         "bins": bins,
         "usage": scale("usage"),
         "whiff": scale("whiff"),
+        "hit": scale("hit"),
         "damage": scale("damage"),
         "sample": int(total),
         "minimum_swings": min_swings,
@@ -1800,10 +1853,8 @@ def build_statistical_report(
             "Batter weakness summaries use exact matchup data when at least 20 pitches are available; otherwise they use the batter's broader historical profile.",
             "Whiff rate uses swinging strikes divided by swings; CSW uses called strikes plus swinging strikes divided by all pitches.",
             "Heatmaps use Statcast zones 1-9 with chase-region summaries where available. Sparse cells display a dash and retain the pitch count.",
-            "Percentile bars are transparent reference-band estimates, not official MLB leaderboard percentiles.",
-            "Pitch grades are descriptive 20-80 grades based on whiff, strike, and contact-management components; they are not official scouting grades.",
             "Spray charts are intentionally omitted from this report; batted-ball quality is summarized with launch-angle and exit-velocity measures instead.",
-            "Pitch tunneling is a proxy based on average release-point similarity and later separation in plate location, movement, and velocity. It is not a full trajectory-overlap model.",
+            "Pitch tunneling is a proxy based on average release-point similarity and later separation in plate location and velocity. It is not a full trajectory-overlap model.",
             "Recent-trend charts use five-appearance-date rolling averages. Off-days are not inserted as zero-value observations.",
             "Estimated WHIP is derived from terminal pitch events and estimated outs. Official ERA is omitted because earned-run attribution is unavailable in the current pitch table.",
         ],

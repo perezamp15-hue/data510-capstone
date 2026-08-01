@@ -90,7 +90,15 @@
     .trend-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
     .trend-card { border:1px solid var(--line); border-radius:14px; padding:14px; background:#fbfdff; }
     .trend-head { display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin-bottom:10px; }
-    .trend-bars { height:92px; display:flex; align-items:flex-end; gap:5px; border-bottom:1px solid var(--line); padding:0 2px; }
+    .trend-chart { display:grid; grid-template-columns:48px 1fr; gap:8px; align-items:stretch; }
+    .trend-y-axis { display:flex; flex-direction:column; justify-content:space-between; text-align:right; font-size:.68rem; color:var(--muted); padding:0 0 20px; }
+    .trend-plot { min-width:0; }
+    .trend-bars { height:92px; display:flex; align-items:flex-end; gap:5px; border-left:1px solid var(--line); border-bottom:1px solid var(--line); padding:0 2px; background:linear-gradient(to bottom, transparent 49%, rgba(148,163,184,.24) 50%, transparent 51%); }
+    .trend-x-axis { display:flex; gap:5px; margin-top:4px; color:var(--muted); font-size:.62rem; }
+    .trend-x-axis span { flex:1; min-width:0; text-align:center; overflow:hidden; white-space:nowrap; }
+    .prob-scale { display:flex; justify-content:space-between; font-size:.64rem; color:var(--muted); margin:4px 0 8px; }
+    .bar.relative { position:relative; overflow:visible; }
+    .bar.relative::before { content:""; position:absolute; left:50%; top:-2px; bottom:-2px; width:1px; background:#64748b; z-index:2; }
     .trend-bar { flex:1; min-width:6px; border-radius:5px 5px 0 0; background:linear-gradient(180deg,#4d86d9,#174ea6); position:relative; }
     .trend-bar:hover::after { content:attr(data-label); position:absolute; left:50%; bottom:calc(100% + 6px); transform:translateX(-50%); white-space:nowrap; background:#13233a; color:white; border-radius:6px; padding:4px 6px; font-size:.72rem; z-index:4; }
     .tunnel-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-top:12px; }
@@ -117,10 +125,6 @@
 
 
     .rolling-table th,.rolling-table td{text-align:center;}
-    .inning-chart{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px;align-items:end;margin-top:12px;}
-    .inning-column{border:1px solid var(--line);border-radius:10px;padding:8px;background:#fbfdff;text-align:center;}
-    .inning-bar{height:90px;display:flex;align-items:end;justify-content:center;margin:6px 0;}
-    .inning-bar span{display:block;width:30px;background:var(--accent);border-radius:6px 6px 0 0;min-height:3px;}
     .release-viz{display:grid;grid-template-columns:minmax(280px,1.2fr) minmax(240px,1fr);gap:18px;align-items:start;}
     .release-svg{width:100%;height:auto;border:1px solid var(--line);border-radius:12px;background:#eef5e8;}
     .release-legend{display:grid;gap:8px;}
@@ -239,10 +243,10 @@
   <div class="wrap">
     <a class="report-tab active" href="#overview" data-report-target="overview">Overview</a>
     
-    <a class="report-tab" href="#opposing-pitcher" data-report-target="opposing-pitcher">{{ opposing_pitcher.identity.full_name }}</a>
-    <a class="report-tab" href="#our-offense" data-report-target="our-offense">{{ our_team }} hitters</a>
-    <a class="report-tab" href="#our-pitcher" data-report-target="our-pitcher">{{ our_pitcher.identity.full_name }}</a>
-    <a class="report-tab" href="#opponent-offense" data-report-target="opponent-offense">{{ opponent_team }} hitters</a>
+    <a class="report-tab" href="#opposing-pitcher" data-report-target="opposing-pitcher">Their pitcher</a>
+    <a class="report-tab" href="#our-offense" data-report-target="our-offense">Our offensive plan</a>
+    <a class="report-tab" href="#our-pitcher" data-report-target="our-pitcher">Our pitcher</a>
+    <a class="report-tab" href="#opponent-offense" data-report-target="opponent-offense">Our pitching plan</a>
   </div>
 </nav>
 <main>
@@ -330,7 +334,7 @@
         <div>
           <span class="pill">{{ team_name }} starting pitcher</span>
           <h2 style="margin-top:8px">{{ profile.identity.full_name }}</h2>
-          <div class="identity">Throws {{ profile.identity.throws or '—' }} · {{ profile.identity.current_team or team_name }} · {{ profile.sample.pitches }} pitches across {{ profile.sample.games }} games</div>
+          <div class="identity">Throws {{ profile.identity.throws or '—' }} · {{ profile.identity.current_team or team_name }} · {{ profile.sample.games }} games</div>
         </div>
         <span class="pill gray">{{ profile.sample.plate_appearances_with_result }} result plate appearances</span>
       </div>
@@ -364,7 +368,7 @@
           {% for page in profile.split_pages %}
           {% set split = page.summary %}
           <div class="heat-panel pitcher-split-panel" data-panel="pitcher-{{ section_id }}-{{ page.key }}" {% if not loop.first %}hidden{% endif %}>
-            <div class="pitcher-split-header"><div><strong>{{ page.label }}</strong><div class="small">All metrics, locations, counts, and sequences below use only this handedness context.</div></div><span class="pill gray">{{ page.pitches }} pitches</span></div>
+            <div class="pitcher-split-header"><div><strong>{{ page.label }}</strong><div class="small">All metrics, locations, counts, and sequences below use only this handedness context.</div></div></div>
             <div class="pitcher-split-grid">
               <div class="metric"><div class="label">Whiff%</div><div class="value">{{ split.rates.whiff_rate_per_swing|pct }}</div></div>
               <div class="metric"><div class="label">CSW%</div><div class="value">{{ split.rates.csw_rate|pct }}</div></div>
@@ -384,7 +388,7 @@
 
             <div class="split-subsection"><h4>Strike zones by pitch type</h4><div class="chart-purpose"><strong>Purpose:</strong> Separate the pitcher’s location pattern for each pitch type so the intended attack area is clear.</div><div class="pitch-type-zone-grid">{% for pitchmap in split.pitch_type_heatmaps %}<div class="pitch-type-zone-card"><div style="display:flex;justify-content:space-between;gap:8px"><strong>{{ pitchmap.pitch }}</strong><span class="small">{{ pitchmap.usage_pct|pct }} usage</span></div>{% if pitchmap.heatmap.available %}<div class="strike-zone-shell"><div class="heat-grid-advanced">{% for cell in pitchmap.heatmap.usage %}<div class="heat-cell-advanced" style="background:color-mix(in srgb,#315f9f {{ (cell.intensity*82)|round }}%,white)" title="{{ cell.pitches }} pitches">{% if cell.value is not none %}{{ cell.value|pct(0) }}{% else %}—{% endif %}</div>{% endfor %}</div></div>{% endif %}</div>{% else %}<div class="small">No pitch type reached the minimum sample.</div>{% endfor %}</div></div>
 
-            <div class="split-subsection"><h4>Count tendencies</h4><div class="chart-purpose"><strong>Purpose:</strong> Identify the pitches most likely to be thrown in each ball-strike count.</div><div class="count-grid">{% for row in split.count_tendencies %}{% if row.context.balls is not none and row.context.strikes is not none %}<div class="count-card"><div class="count-head"><strong>{{ row.context.balls }}-{{ row.context.strikes }}</strong></div>{% for p in row.pitches[:3] %}<div class="small">{{ p.pitch }} · {{ p.probability_pct|pct }}</div>{% endfor %}</div>{% endif %}{% else %}<div class="small">No count data.</div>{% endfor %}</div></div>
+            <div class="split-subsection"><h4>Count tendencies</h4><div class="chart-purpose"><strong>Purpose:</strong> Identify the pitches most likely to be thrown in each ball-strike count.</div><div class="count-grid">{% for row in split.count_tendencies %}{% if row.context.balls is not none and row.context.strikes is not none and row.context.balls <= 3 and row.context.strikes <= 2 %}<div class="count-card"><div class="count-head"><strong>{{ row.context.balls }}-{{ row.context.strikes }}</strong></div>{% for p in row.pitches[:3] %}<div class="small">{{ p.pitch }} · {{ p.probability_pct|pct }}</div>{% endfor %}</div>{% endif %}{% else %}<div class="small">No count data.</div>{% endfor %}</div></div>
 
             <div class="split-subsection"><h4>Common pitch sequences</h4><div class="chart-purpose"><strong>Purpose:</strong> Show the most common pitch-to-pitch transitions used to set up hitters.</div><div class="card" style="box-shadow:none">{% for row in split.sequences.transitions %}<div class="sequence"><strong>{{ row.first_pitch }}</strong><span class="arrow">→</span><strong>{{ row.next_pitch }}</strong><span>{{ row.conditional_probability_pct|pct }}</span></div>{% else %}<div class="small">Not enough sequence data.</div>{% endfor %}</div></div>
           </div>
@@ -399,23 +403,16 @@
         {% for metric in profile.rolling_trends.metrics %}
         <div class="trend-card">
           <div class="trend-head"><strong>{{ metric.label }}</strong><span>{{ metric.latest|number }}{{ metric.suffix }}</span></div>
-          <div class="trend-bars" aria-label="{{ metric.label }} five-appearance rolling trend">
-            {% for point in metric.points %}<div class="trend-bar" style="height:{{ point.height }}%" data-label="{{ point.date }} · {{ point.value|number }}{{ metric.suffix }}"></div>{% endfor %}
+          <div class="trend-chart">
+            <div class="trend-y-axis"><span>{{ metric.axis_max|number }}{{ metric.suffix }}</span><span>{{ metric.axis_mid|number }}{{ metric.suffix }}</span><span>{{ metric.axis_min|number }}{{ metric.suffix }}</span></div>
+            <div class="trend-plot"><div class="trend-bars" aria-label="{{ metric.label }} five-appearance rolling trend">
+              {% for point in metric.points %}<div class="trend-bar" style="height:{{ point.height }}%" data-label="{{ point.date }} · {{ point.value|number }}{{ metric.suffix }}"></div>{% endfor %}
+            </div><div class="trend-x-axis">{% for point in metric.points %}<span>{{ point.date[5:] }}</span>{% endfor %}</div></div>
           </div>
         </div>
         {% else %}<div class="small">Not enough recent appearance data.</div>{% endfor %}
       </div>
 
-
-      <h3 style="margin-top:22px">By inning</h3><div class="chart-purpose"><strong>Purpose:</strong> Show how effectiveness and velocity change as the pitcher moves deeper into games.</div>
-      <div class="inning-chart">
-        {% for row in profile.inning_progression %}
-        <div class="inning-column"><strong>Inning {{ row.inning }}</strong><div class="inning-bar"><span style="height:{{ [row.whiff_pct or 0, 80]|min }}%"></span></div><div class="small">Whiff {{ row.whiff_pct|pct }}</div><div class="small">Velo {{ row.avg_velocity|number }} mph</div><div class="small">OPS {{ row.ops|rate }}</div></div>
-        {% else %}<div class="small">No inning-level data available.</div>{% endfor %}
-      </div>
-      <div class="table-wrap" style="margin-top:10px"><table><thead><tr><th>Inn</th><th>Pitches</th><th>PA</th><th>AVG</th><th>OPS</th><th>K%</th><th>BB%</th><th>Velo</th><th>Spin</th><th>Whiff%</th></tr></thead><tbody>
-      {% for row in profile.inning_progression %}<tr><td>{{ row.inning }}</td><td>{{ row.pitches }}</td><td>{{ row.plate_appearances }}</td><td>{{ row.avg|rate }}</td><td>{{ row.ops|rate }}</td><td>{{ row.k_pct|pct }}</td><td>{{ row.bb_pct|pct }}</td><td>{{ row.avg_velocity|number }}</td><td>{{ row.avg_spin|number(0) }}</td><td>{{ row.whiff_pct|pct }}</td></tr>{% endfor %}
-      </tbody></table></div>
 
       <div class="section-block">
         <h3>Release profile</h3>
@@ -443,14 +440,12 @@
         <div class="advanced-tabs" data-tabs>
           <div class="heat-tabs">
             <button type="button" class="active" data-target="advanced-usage">Frequency</button>
-            <button type="button" data-target="advanced-whiff">Whiff</button>
           </div>
           {% for key, title, cells, format_type, low_label, high_label in [
             ('advanced-usage','Pitch frequency',profile.enhanced_heatmap.usage,'pct','Less used','More used'),
-            ('advanced-whiff','Whiff locations',profile.enhanced_heatmap.whiff,'pct','Lower whiff','Higher whiff')
           ] %}
           <div class="heat-panel" data-panel="{{ key }}" {% if not loop.first %}hidden{% endif %}>
-            <div class="strike-zone-shell"><div class="heat-grid-advanced">{% for cell in cells %}{% if key == 'advanced-whiff' %}{% set denominator = cell.swings ~ ' swings' %}{% else %}{% set denominator = cell.pitches ~ ' pitches' %}{% endif %}<div class="heat-cell-advanced" style="background:color-mix(in srgb, {% if key == 'advanced-whiff' %}#2a9d8f{% else %}#315f9f{% endif %} {{ (cell.intensity*82)|round }}%, white)" title="{{ cell.pitches }} pitches · {{ denominator }}">{% if cell.value is not none %}{{ cell.value|pct(0) }}{% else %}—{% endif %}</div>{% endfor %}</div></div>
+            <div class="strike-zone-shell"><div class="heat-grid-advanced">{% for cell in cells %}{% set denominator = cell.pitches ~ ' pitches' %}<div class="heat-cell-advanced" style="background:color-mix(in srgb, #315f9f {{ (cell.intensity*82)|round }}%, white)" title="{{ cell.pitches }} pitches · {{ denominator }}">{% if cell.value is not none %}{{ cell.value|pct(0) }}{% else %}—{% endif %}</div>{% endfor %}</div></div>
           </div>
           {% endfor %}
         </div>
@@ -460,12 +455,12 @@
       <details class="compact-details">
         <summary>Pitch tunneling details</summary>
         <div class="details-body">
-        {% if profile.pitch_tunneling.available %}<div class="tunnel-grid">{% for pair in profile.pitch_tunneling.pairs %}<div class="tunnel-pair"><div class="tunnel-title"><strong>{{ pair.pitch_one }} → {{ pair.pitch_two }}</strong><span class="grade">{{ pair.grade }}</span></div><div class="tunnel-metrics"><div><span class="small">Release separation</span><br><strong>{{ pair.release_separation_inches|number }} in</strong></div><div><span class="small">Plate separation</span><br><strong>{{ pair.plate_separation_inches|number }} in</strong></div><div><span class="small">Movement separation</span><br><strong>{{ pair.movement_separation_inches|number }} in</strong></div><div><span class="small">Velocity gap</span><br><strong>{{ pair.velocity_gap_mph|number }} mph</strong></div></div><div class="small" style="margin-top:8px">Samples: {{ pair.count_one }} / {{ pair.count_two }}</div></div>{% endfor %}</div>{% else %}<div class="note">Not enough complete data.</div>{% endif %}</div>
+        {% if profile.pitch_tunneling.available %}<div class="tunnel-grid">{% for pair in profile.pitch_tunneling.pairs %}<div class="tunnel-pair"><div class="tunnel-title"><strong>{{ pair.pitch_one }} → {{ pair.pitch_two }}</strong></div><div class="tunnel-metrics"><div><span class="small">Release separation</span><br><strong>{{ pair.release_separation_inches|number }} in</strong></div><div><span class="small">Plate separation</span><br><strong>{{ pair.plate_separation_inches|number }} in</strong></div><div><span class="small">Velocity gap</span><br><strong>{{ pair.velocity_gap_mph|number }} mph</strong></div></div><div class="small" style="margin-top:8px">Samples: {{ pair.count_one }} / {{ pair.count_two }}</div></div>{% endfor %}</div>{% else %}<div class="note">Not enough complete data.</div>{% endif %}</div>
       </details>
 
       <details class="compact-details">
         <summary>Full pitch arsenal table</summary>
-        <div class="details-body"><div class="table-wrap"><table><thead><tr><th>Pitch</th><th>Usage</th><th>N</th><th>Velo</th><th>Spin</th><th>H-Break</th><th>V-Break</th><th>Release Ht</th><th>Ext</th><th>Strike%</th><th>Whiff%</th><th>Chase%</th><th>Put-away%</th><th>Zone%</th><th>Grade</th></tr></thead><tbody>{% for row in profile.arsenal %}<tr><td><strong>{{ row.pitch }}</strong></td><td>{{ row.usage_pct|pct }}</td><td>{{ row.count }}</td><td>{{ row.avg_velocity|number }}</td><td>{{ row.avg_spin|number(0) }}</td><td>{{ row.horizontal_break|number }}</td><td>{{ row.vertical_break|number }}</td><td>{{ row.release_height|number }}</td><td>{{ row.avg_extension|number }}</td><td>{{ row.strike_pct|pct }}</td><td>{{ row.whiff_pct|pct }}</td><td>{{ row.chase_pct|pct }}</td><td>{{ row.put_away_pct|pct }}</td><td>{{ row.zone_pct|pct }}</td><td><span class="grade">{{ row.grade or '—' }}</span></td></tr>{% else %}<tr><td colspan="15">No arsenal data available.</td></tr>{% endfor %}</tbody></table></div></div>
+        <div class="details-body"><div class="table-wrap"><table><thead><tr><th>Pitch</th><th>Usage</th><th>N</th><th>Velo</th><th>Spin</th><th>H-Break</th><th>V-Break</th><th>Release Ht</th><th>Ext</th><th>Strike%</th><th>Whiff%</th><th>Chase%</th><th>Put-away%</th><th>Zone%</th></tr></thead><tbody>{% for row in profile.arsenal %}<tr><td><strong>{{ row.pitch }}</strong></td><td>{{ row.usage_pct|pct }}</td><td>{{ row.count }}</td><td>{{ row.avg_velocity|number }}</td><td>{{ row.avg_spin|number(0) }}</td><td>{{ row.horizontal_break|number }}</td><td>{{ row.vertical_break|number }}</td><td>{{ row.release_height|number }}</td><td>{{ row.avg_extension|number }}</td><td>{{ row.strike_pct|pct }}</td><td>{{ row.whiff_pct|pct }}</td><td>{{ row.chase_pct|pct }}</td><td>{{ row.put_away_pct|pct }}</td><td>{{ row.zone_pct|pct }}</td></tr>{% else %}<tr><td colspan="14">No arsenal data available.</td></tr>{% endfor %}</tbody></table></div></div>
       </details>
     </div>
   </section>
@@ -473,27 +468,35 @@
 
   {{ pitcher_profile(opposing_pitcher, 'opposing-pitcher', opponent_team) }}
 
-  {% macro matchup_sections(matchups, section_id, offense_team, pitcher_name) %}
+  {% macro matchup_sections(matchups, section_id, offense_team, pitcher_name, mode, game_plan) %}
   <section id="{{ section_id }}">
-    <h2>{{ offense_team }} hitters vs. {{ pitcher_name }}</h2>
+    <h2>{% if mode == 'offense' %}Our offense vs. their pitcher{% else %}Our pitcher vs. their lineup{% endif %}</h2>
+    <div class="card" style="margin-bottom:16px">
+      <h3>{% if mode == 'offense' %}Team offensive opportunity card{% else %}Opposing lineup weakness card{% endif %}</h3>
+      <div class="grid grid-2">
+        <div><strong>{% if mode == 'offense' %}Prepare for{% else %}Primary weapon{% endif %}</strong><div>{{ game_plan.primary_pitch or '—' }}</div></div>
+        <div><strong>{% if mode == 'offense' %}Two-strike threat{% else %}Put-away weapon{% endif %}</strong><div>{{ game_plan.putaway_pitch or '—' }}</div></div>
+        <div><strong>{% if mode == 'offense' %}Highest-upside hitters{% else %}Highest-risk hitters{% endif %}</strong><div>{{ game_plan.dangerous_hitters|join(', ') or '—' }}</div></div>
+        <div><strong>{% if mode == 'offense' %}Most vulnerable matchups{% else %}Best attack targets{% endif %}</strong><div>{{ game_plan.attack_hitters|join(', ') or '—' }}</div></div>
+      </div>
+    </div>
     {% for matchup in matchups %}
     <details class="matchup" {% if loop.first %}open{% endif %}>
       <summary>
         <span class="order-number">{{ matchup.lineup_order }}</span>
         <span>{{ matchup.batter.full_name }}<div class="small">Bats {{ matchup.batter.bats or '—' }} · {{ matchup.batter.position_name or matchup.batter.primary_position or '—' }}</div><span class="split-badge">{{ matchup.matchup_split.label }}</span></span>
-        <span class="pitcher-vs">vs. {{ matchup.pitcher.full_name }}</span>
-        <span class="pill {% if matchup.confidence.label in ['Limited','Contextual'] %}red{% endif %}">{{ matchup.confidence.label }} · {{ matchup.confidence.score }}% · <span class="stars">{{ "★" * matchup.confidence.stars }}{{ "☆" * (5-matchup.confidence.stars) }}</span></span>
+        <span class="pitcher-vs">vs. {{ matchup.pitcher.full_name }}</span></span>
       </summary>
       <div class="matchup-body">
-        <div class="note" style="margin-bottom:14px"><strong>Active split:</strong> {{ matchup.matchup_split.label }} · Batter sample {{ matchup.matchup_split.batter_split_pitches }} pitches · Pitcher split sample {{ matchup.matchup_split.pitcher_split_pitches }} pitches · Analysis source: {{ matchup.weakness_source }}</div>
-        <div class="takeaway-card" style="margin-bottom:14px"><strong>Batter takeaways</strong><ul>{% for item in matchup.takeaways %}<li>{{ item }}</li>{% endfor %}</ul></div>
+        <div class="note" style="margin-bottom:14px"><strong>Active split:</strong> {{ matchup.matchup_split.label }} · Analysis source: {{ matchup.weakness_source }}</div>
+        <div class="takeaway-card" style="margin-bottom:14px"><strong>{% if mode == 'offense' %}Hitter approach{% else %}Pitcher attack plan{% endif %}</strong><ul>{% for item in matchup.takeaways %}<li>{{ item }}</li>{% endfor %}</ul></div>
         <div class="split-page-tabs" data-tabs>
-          <div class="split-page-heading"><h3 style="margin:0">Batter handedness pages</h3><span class="small">Switch between complete vs-LHP and vs-RHP profiles</span></div><div class="chart-purpose"><strong>Purpose:</strong> Compare the batter’s results, plate discipline, and swing-and-miss locations against left- and right-handed pitchers.</div>
+          <div class="split-page-heading"><h3 style="margin:0">Batter handedness pages</h3><span class="small">Switch between complete vs-LHP and vs-RHP profiles</span></div><div class="chart-purpose"><strong>Purpose:</strong> Compare the batter’s results, plate discipline, and contact locations against left- and right-handed pitchers.</div>
           <div class="heat-tabs">{% for page in matchup.batter_split_pages %}<button type="button" {% if loop.first %}class="active"{% endif %} data-target="{{ page.key }}-{{ matchup.lineup_order }}-{{ section_id }}">{{ page.label }}</button>{% endfor %}</div>
           {% for page in matchup.batter_split_pages %}
           <div class="heat-panel" data-panel="{{ page.key }}-{{ matchup.lineup_order }}-{{ section_id }}" {% if not loop.first %}hidden{% endif %}>
             <div class="grid grid-4">
-              <div class="metric"><div class="label">Pitches</div><div class="value">{{ page.summary.sample.pitches }}</div></div>
+              
               <div class="metric"><div class="label">Result PA</div><div class="value">{{ page.summary.sample.plate_appearances_with_result }}</div></div>
               <div class="metric"><div class="label">Whiff%</div><div class="value">{{ page.summary.rates.whiff_rate_per_swing|pct }}</div></div>
               <div class="metric"><div class="label">Batting average</div><div class="value">{{ page.summary.rates.batting_average|rate }}</div></div>
@@ -505,36 +508,38 @@
             {% endif %}
             <div class="grid grid-2" style="margin-top:12px">
               <div class="takeaway-card"><strong>{{ page.label }} takeaways</strong><ul>{% for item in page.takeaways %}<li>{{ item }}</li>{% endfor %}</ul></div>
-              <div><div class="chart-purpose"><strong>Purpose:</strong> Show where this batter swings and misses most often against the selected pitcher handedness.</div><div class="strike-zone-shell"><div class="heat-grid-advanced">{% for cell in page.enhanced_heatmap.whiff %}<div class="heat-cell-advanced" style="background:color-mix(in srgb, #2a9d8f {{ (cell.intensity*82)|round }}%, white)" title="{{ cell.pitches }} pitches · {{ cell.swings }} swings">{% if cell.value is not none %}{{ cell.value|pct(0) }}{% else %}—{% endif %}</div>{% endfor %}</div></div><div class="small" style="text-align:center;margin-top:6px">Whiff map for {{ page.label }}</div></div>
+              <div><div class="chart-purpose"><strong>Purpose:</strong> Show where this batter produces hits most often against the selected pitcher handedness.</div><div class="strike-zone-shell"><div class="heat-grid-advanced">{% for cell in page.enhanced_heatmap.hit %}<div class="heat-cell-advanced" style="background:color-mix(in srgb, #d97706 {{ (cell.intensity*82)|round }}%, white)" title="{{ cell.batted_balls }} balls in play">{% if cell.value is not none %}{{ cell.value|pct(0) }}{% else %}—{% endif %}</div>{% endfor %}</div></div><div class="small" style="text-align:center;margin-top:6px">Hit-rate map for {{ page.label }}</div></div>
             </div>
           </div>
           {% endfor %}
         </div>
 
         <div class="grid grid-4" style="margin-top:16px">
-          <div class="metric"><div class="label">Historical pitches seen</div><div class="value">{{ matchup.batter_summary.sample.pitches }}</div></div>
           <div class="metric"><div class="label">Whiff / swing</div><div class="value">{{ matchup.batter_summary.rates.whiff_rate_per_swing|pct }}</div></div>
           <div class="metric"><div class="label">AVG estimate</div><div class="value">{{ matchup.batter_summary.traditional_estimates.batting_average_estimate|rate }}</div></div>
           <div class="metric"><div class="label">OB rate estimate</div><div class="value">{{ matchup.batter_summary.traditional_estimates.on_base_rate_estimate|rate }}</div></div>
           <div class="metric"><div class="label">Avg exit velocity</div><div class="value">{{ matchup.batter_summary.averages.exit_velocity|number }} mph</div></div>
           <div class="metric"><div class="label">CSW rate seen</div><div class="value">{{ matchup.batter_summary.rates.csw_rate_seen|pct }}</div></div>
         </div>
-        <div class="tool-grid" style="margin-top:14px; grid-template-columns:repeat(3,minmax(0,1fr))">
-          <div class="tool"><span class="small">Contact</span><strong>{{ matchup.batter_tools.contact or '—' }}</strong></div>
-          <div class="tool"><span class="small">Power</span><strong>{{ matchup.batter_tools.power or '—' }}</strong></div>
-          <div class="tool"><span class="small">Discipline</span><strong>{{ matchup.batter_tools.discipline or '—' }}</strong></div>
-        </div>
 
         <div class="grid" style="margin-top:18px">
           <div class="card" style="box-shadow:none">
-            <h3>Where the batter struggles</h3>
-            <h4 style="margin-top:12px">Pitch types</h4>
+            <h3>{% if mode == 'offense' %}What this hitter should attack{% else %}How our pitcher should attack this hitter{% endif %}</h3>
+            <div class="chart-purpose"><strong>Purpose:</strong> {% if mode == 'offense' %}Match this hitter's damage profile only to pitches the opposing pitcher actually throws.{% else %}Match the hitter's weaknesses only to pitches in our pitcher's actual arsenal.{% endif %}</div>
+            <h4 style="margin-top:12px">{% if mode == 'offense' %}Pitches to attack{% else %}Recommended pitches{% endif %}</h4>
             <ul class="weakness-list">
-              {% for row in matchup.weak_pitches %}<li><strong>{{ row.pitch }}</strong>: {{ row.whiff_pct|pct }} whiff per swing over {{ row.pitches }} pitches</li>{% else %}<li>Not enough pitch-type sample.</li>{% endfor %}
+              {% set recommended_pitches = matchup.offensive_plan.attack_pitches if mode == 'offense' else matchup.pitching_plan.primary_pitches %}
+              {% for row in recommended_pitches %}<li><strong>{{ row.pitch }}</strong>: {% if mode == 'offense' %}{{ row.hard_hit_pct|pct }} hard-hit rate{% else %}{{ row.whiff_pct|pct }} whiff per swing{% endif %} over {{ row.pitches }} pitches</li>{% else %}<li>Not enough pitch-type sample.</li>{% endfor %}
             </ul>
-            <h4 style="margin-top:12px">Locations</h4>
+            <h4 style="margin-top:12px">{% if mode == 'offense' %}Locations to attack{% else %}Locations to target{% endif %}</h4>
             <ul class="weakness-list">
-              {% for row in matchup.weak_zones %}<li><strong>{{ row.label }}</strong>: {{ row.whiff_pct|pct }} whiff per swing over {{ row.pitches }} pitches</li>{% else %}<li>Not enough zone sample.</li>{% endfor %}
+              {% set recommended_zones = matchup.offensive_plan.attack_zones if mode == 'offense' else matchup.pitching_plan.attack_zones %}
+              {% for row in recommended_zones %}<li><strong>{{ row.label }}</strong>: {% if mode == 'offense' %}{{ row.hard_hit_pct|pct }} hard-hit rate{% else %}{{ row.whiff_pct|pct }} whiff per swing{% endif %} over {{ row.pitches }} pitches</li>{% else %}<li>Not enough zone sample.</li>{% endfor %}
+            </ul>
+            <h4 style="margin-top:12px">{% if mode == 'offense' %}Pitches to avoid{% else %}Danger pitches to avoid{% endif %}</h4>
+            <ul class="weakness-list">
+              {% set avoid_pitches = matchup.offensive_plan.avoid_pitches if mode == 'offense' else matchup.pitching_plan.avoid_pitches %}
+              {% for row in avoid_pitches %}<li><strong>{{ row.pitch }}</strong></li>{% else %}<li>Not enough sample.</li>{% endfor %}
             </ul>
           </div>
         </div>
@@ -557,19 +562,21 @@
         {% endmacro %}
 
         <div class="card advanced-tabs" style="box-shadow:none; margin-top:20px" data-tabs>
-          <h3>Continuous strike-zone view</h3><div class="chart-purpose"><strong>Purpose:</strong> Compare the batter’s swing-and-miss locations with the opposing pitcher’s preferred attack locations.</div>
+          <h3>Continuous strike-zone view</h3><div class="chart-purpose"><strong>Purpose:</strong> {% if mode == 'offense' %}Compare this hitter’s productive zones with the opposing pitcher’s locations.{% else %}Compare the opposing hitter’s weak zones with our pitcher’s attack locations.{% endif %}</div>
           <div class="heat-tabs">
-            <button type="button" class="active" data-target="batter-whiff">Batter whiff</button>
+            <button type="button" class="active" data-target="batter-hit">Team hit zones</button>
+            <button type="button" data-target="batter-miss">Swing-and-miss zones</button>
             <button type="button" data-target="pitcher-usage">Pitcher attack</button>
           </div>
           {% set batter_maps = [
-            ('batter-whiff','Batter whiff locations',matchup.enhanced_batter_heatmap.whiff,'pct','Lower whiff','Higher whiff','#2a9d8f'),
+            ('batter-hit','Team hit-rate locations',matchup.enhanced_batter_heatmap.hit,'pct','Fewer hits','More hits','#d97706'),
+            ('batter-miss','Swing-and-miss locations',matchup.enhanced_batter_heatmap.whiff,'pct','Fewer misses','More misses','#2a9d8f'),
             ('pitcher-usage','Pitcher attack frequency',matchup.enhanced_pitcher_heatmap.usage,'pct','Less used','More used','#315f9f')
           ] %}
           {% for key,title,cells,format_type,low_label,high_label,color in batter_maps %}
           <div class="heat-panel" data-panel="{{ key }}" {% if not loop.first %}hidden{% endif %}>
             {% if cells %}
-            <div class="strike-zone-shell"><div class="heat-grid-advanced">{% for cell in cells %}{% if key == 'batter-whiff' %}{% set denominator = cell.swings ~ ' swings' %}{% else %}{% set denominator = cell.pitches ~ ' pitches' %}{% endif %}<div class="heat-cell-advanced" style="background:color-mix(in srgb, {{ color }} {{ (cell.intensity*82)|round }}%, white)" title="{{ cell.pitches }} pitches · {{ denominator }}">{% if cell.value is not none %}{{ cell.value|pct(0) }}{% else %}—{% endif %}</div>{% endfor %}</div></div>
+            <div class="strike-zone-shell"><div class="heat-grid-advanced">{% for cell in cells %}{% if key == 'batter-miss' %}{% set denominator = cell.swings ~ ' swings' %}{% elif key == 'batter-hit' %}{% set denominator = cell.batted_balls ~ ' balls in play' %}{% else %}{% set denominator = cell.pitches ~ ' pitches' %}{% endif %}<div class="heat-cell-advanced" style="background:color-mix(in srgb, {{ color }} {{ (cell.intensity*82)|round }}%, white)" title="{{ cell.pitches }} pitches · {{ denominator }}">{% if cell.value is not none %}{{ cell.value|pct(0) }}{% else %}—{% endif %}</div>{% endfor %}</div></div>
             {% else %}<div class="note">Not enough plate-coordinate data for this view.</div>{% endif %}
           </div>
           {% endfor %}
@@ -589,8 +596,11 @@
               {% for metric in matchup.rolling_trends.metrics %}
               <div class="trend-card">
                 <div class="trend-head"><strong>{{ metric.label }}</strong><span>{{ metric.latest|number }}{{ metric.suffix }}</span></div>
-                <div class="trend-bars" aria-label="{{ metric.label }} five-appearance rolling trend">
-                  {% for point in metric.points %}<div class="trend-bar" style="height:{{ point.height }}%" data-label="{{ point.date }} · {{ point.value|number }}{{ metric.suffix }}"></div>{% endfor %}
+                <div class="trend-chart">
+                  <div class="trend-y-axis"><span>{{ metric.axis_max|number }}{{ metric.suffix }}</span><span>{{ metric.axis_mid|number }}{{ metric.suffix }}</span><span>{{ metric.axis_min|number }}{{ metric.suffix }}</span></div>
+                  <div class="trend-plot"><div class="trend-bars" aria-label="{{ metric.label }} five-appearance rolling trend">
+                    {% for point in metric.points %}<div class="trend-bar" style="height:{{ point.height }}%" data-label="{{ point.date }} · {{ point.value|number }}{{ metric.suffix }}"></div>{% endfor %}
+                  </div><div class="trend-x-axis">{% for point in metric.points %}<span>{{ point.date[5:] }}</span>{% endfor %}</div></div>
                 </div>
               </div>
               {% else %}<div class="small">Not enough recent batter appearances.</div>{% endfor %}
@@ -598,14 +608,14 @@
           </div>
         </div>
 
-        <h3 style="margin-top:20px">Pitch probabilities by count</h3><div class="chart-purpose"><strong>Purpose:</strong> Estimate which pitch type the batter is most likely to see in each count.</div>
+        <h3 style="margin-top:20px">{% if mode == 'offense' %}Expected pitches by count{% else %}Recommended count plan from our pitcher’s tendencies{% endif %}</h3><div class="chart-purpose"><strong>Purpose:</strong> Show actual pre-pitch count tendencies only (0–3 balls and 0–2 strikes).</div>
         <div class="grid grid-3">
           {% for count in matchup.count_probabilities %}
           <div class="count-card">
             <div class="count-head"><strong>{{ count.count }}</strong></div>
             <div class="small" style="margin-bottom:8px">{{ count.source }}</div>
             {% for pitch in count.pitches %}
-            <div class="prob-row"><span>{{ pitch.pitch }}</span><strong>{{ pitch.probability_pct|pct }}</strong><div class="bar"><span style="width:{{ pitch.probability_pct or 0 }}%"></span></div></div>
+            <div class="prob-row"><span>{{ pitch.pitch }}</span><strong>{{ pitch.probability_pct|pct }}</strong><div class="bar"><span style="width:{{ [pitch.probability_pct or 0, 100]|min }}%"></span></div></div>
             {% else %}<div class="small">No historical pitches available.</div>{% endfor %}
           </div>
           {% endfor %}
@@ -628,9 +638,9 @@
   </section>
   {% endmacro %}
 
-  {{ matchup_sections(our_offense_matchups, 'our-offense', our_team, opposing_pitcher.identity.full_name) }}
+  {{ matchup_sections(our_offense_matchups, 'our-offense', our_team, opposing_pitcher.identity.full_name, 'offense', our_game_plan) }}
   {{ pitcher_profile(our_pitcher, 'our-pitcher', our_team) }}
-  {{ matchup_sections(opponent_offense_matchups, 'opponent-offense', opponent_team, our_pitcher.identity.full_name) }}
+  {{ matchup_sections(opponent_offense_matchups, 'opponent-offense', opponent_team, our_pitcher.identity.full_name, 'pitching', opponent_game_plan) }}
 
 </main>
 <footer>Generated from the project PostgreSQL player, team, game, and pitch tables. No machine-learning artifact is loaded.</footer>
