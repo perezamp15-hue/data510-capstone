@@ -5,7 +5,7 @@
   },
   "deploy": {
     "preDeployCommand": "alembic upgrade head",
-    "startCommand": "python scripts/run_daily_pipeline.py --skip-players --pitch-limit 5",
+    "startCommand": "python scripts/run_daily_pipeline.py --skip-players --schedule-days-back 7 --schedule-days-forward 14 --pitch-days-back 7 --pitch-limit 10",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 2
   }
