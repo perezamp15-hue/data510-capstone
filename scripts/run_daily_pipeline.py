@@ -208,6 +208,16 @@ def parse_arguments() -> argparse.Namespace:
     )
 
     parser.add_argument(
+        "--schedule-days-forward",
+        type=int,
+        default=14,
+        help=(
+            "Number of days after the target date to refresh "
+            "upcoming schedule records. Default: 14."
+        ),
+    )
+
+    parser.add_argument(
         "--pitch-days-back",
         type=int,
         default=2,
@@ -272,6 +282,11 @@ def main() -> int:
             "--schedule-days-back cannot be negative."
         )
 
+    if arguments.schedule_days_forward < 0:
+        raise ValueError(
+            "--schedule-days-forward cannot be negative."
+        )
+
     if arguments.pitch_days_back < 0:
         raise ValueError(
             "--pitch-days-back cannot be negative."
@@ -284,6 +299,10 @@ def main() -> int:
 
     schedule_start_date = target_date - timedelta(
         days=arguments.schedule_days_back
+    )
+
+    schedule_end_date = target_date + timedelta(
+        days=arguments.schedule_days_forward
     )
 
     pitch_start_date = target_date - timedelta(
@@ -331,7 +350,7 @@ def main() -> int:
         "games",
         collect_games,
         start_date=schedule_start_date,
-        end_date=target_date,
+        end_date=schedule_end_date,
     )
     results.append(game_result)
 
