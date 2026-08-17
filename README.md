@@ -10,7 +10,7 @@
 | Owner Product Lead | Aaron Perez |
 | Peer Stakeholder POs | Bradley Allen,	Addison Gage,	Sarah Alhusaynat |
 | Studio Session | 1 |
-| GitHub repo | <https://github.com/perezamp15-hue/data510-FitnessPal> |
+| GitHub repo | <https://github.com/perezamp15-hue/data510-capstone> |
 | GitHub Projects board | https://github.com/users/perezamp15-hue/projects/1 |
 | Discord category | `#<project>-1` |
 | Instructor / Sponsor | Lucas Cordova (`LucasCordova` on GitHub) |
